@@ -229,8 +229,8 @@ Every lifecycle operation writes its activity record after it commits: `audit_lo
 `audit_log.keys_rewrapped`. A record that cannot be written never undoes the operation: it is reported, the result says
 `recorded: false`, and the command warns. `audit-log:reconcile` then writes, from the journal, every record still
 missing for the operations journalled within the days `--since` looks back, 7 by default and up to 3650, and skips those
-already recorded, stored or still waiting in the outbox. A record's id is derived from its code and its operation, so
-however often it is written, by the operation or by reconciliation, it is stored once:
+already recorded: stored, still waiting in the outbox, or pruned by retention. A record's id is derived from its code
+and its operation, so however often it is written, by the operation or by reconciliation, it is stored once:
 
 ```bash
 php artisan audit-log:reconcile --since=30

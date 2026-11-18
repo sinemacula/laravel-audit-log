@@ -55,7 +55,8 @@ written and what the store may do to a row are fixed here; a change to any of th
 - The longest suffix is 16 characters, so `entries.table` is 1 to 47 lower-case letters, digits and underscores that
   does not start with a digit (`Database\EntrySettings`), and `audit-log:check` holds the prefixed name to 47 too, so
   every name fits PostgreSQL's 63. Capitals are refused because every engine reports index names in lower case and
-  MySQL's `lower_case_table_names` treats a table name's case differently from one server to the next.
+  MySQL's `lower_case_table_names` treats a table name's case differently from one server to the next. A table setting
+  that is not set, `null` or empty names its default table, for every table.
 - On MySQL the table is `utf8mb4` with the collation `utf8mb4_0900_bin` and the `InnoDB` engine, so every character
   column, identifiers included, is binary and NO PAD: ids that differ only in case or by a trailing space stay
   distinct. MySQL must be 8.4 or later and run in strict mode, so a value that does not fit is refused instead of cut.
@@ -147,10 +148,9 @@ written and what the store may do to a row are fixed here; a change to any of th
   times. No column is named a reserved word on any engine (`lines_read`, `input_format`), and a batch is never deleted.
 - `privacy.subject_keys_table` (`audit_log_subject_keys` by default), `privacy.owner_erasures_table`
   (`audit_log_owner_erasures`) and `privacy.key_uses_table` (`audit_log_key_uses`) are always on the storage connection,
-  beside the entries whose fields their keys encrypt, and no setting moves them (`Database\KeyTables`). A setting that
-  is not set, `null` or empty names its default table. Each follows the entries table: the table name's grammar, no
-  foreign keys, and on MySQL `utf8mb4_0900_bin` and `InnoDB`, so each commits with what it describes. Their migrations
-  seed no row.
+  beside the entries whose fields their keys encrypt, and no setting moves them (`Database\KeyTables`). Each follows
+  the entries table: the table name's grammar, no foreign keys, and on MySQL `utf8mb4_0900_bin` and `InnoDB`, so each
+  commits with what it describes. Their migrations seed no row.
 - The subject keys table holds one row per key unit and generation, in 15 columns: `id` (a UUID version 7, its primary
   key, which every envelope the key sealed names and which is never derived from the owner), the unit's `owner_type`,
   `owner_id`, `tenant_type` and `tenant_id` (`string(191)`, the tenant's pair nullable) and `category` (`string(64)`),
@@ -325,7 +325,8 @@ block, which runs after the others:
   the artifacts and the deliveries, because pruning deletes an entry's artifact and receipts with it and keeps every
   checkpoint and member; `SELECT` on the checkpoints, the members, the integrity state, for the installation id, and the
   outbox when it is on the storage database; `SELECT` and `INSERT` on the journal; `SELECT`, `INSERT` and `DELETE` on
-  the holds; and `SELECT` and `UPDATE` of `token` and `locked_at` alone on the lock.
+  the holds; and `SELECT` and `UPDATE` of `token` and `locked_at` alone on the lock, which `audit-log:check` reads
+  through the maintenance connection once it reaches the storage connection's installation.
 - For the owners' keys, the writer is granted `SELECT` and `INSERT` on the subject keys and the key uses, because it
   creates a key the first time an owner's field is sealed and inserts each key use with its entry, and `SELECT` on the
   owner erasures, because it reads the owner's latest marker before it creates a key; it updates no key. The maintenance
@@ -1039,13 +1040,16 @@ COMMIT;
   `testTheMigrationCreatesTheTableOnTheStorageConnection`, `testTheMaintenanceConnectionNeverHoldsTheTable`
 - `tests/Feature/Database/StorageConnectionTest.php` `testTheMaintenanceConnectionDefaultsToTheStorageConnection`,
   `testAMaintenanceConnectionThatIsNotANameFailsClosed`
-- `tests/Feature/Database/EntrySettingsTest.php` `testRefusesATableThatCannotNameEveryIndex`
+- `tests/Feature/Database/EntrySettingsTest.php` `testRefusesATableThatCannotNameEveryIndex`,
+  `testANullOrEmptyTableSettingIsItsDefault`
 - `tests/Feature/Models/AuditEntryTest.php` `testRefusesEveryWriteThroughTheModel`,
   `testEveryModelWritePathIsAccountedFor`, `testQueryBuilderWritesBypassTheModelAsDocumented`
 - `tests/Integration/Stores/DatabaseAuditStoreTest.php` `testInsideATransactionTheInsertRunsInASavepoint`,
   `testAFailedAuditInsertLeavesAHealthyHostTransactionUsable`, `testTheStoreCatchesNothingButADuplicate`
 - `tests/Integration/Stores/LeastPrivilegeWriterTest.php`
   `testAWriterGrantedOnlyWhatTheStoreNeedsStoresAndResolvesDuplicates`, `testOnMySqlTheLockingReadNeedsOnlySelect`
+- `tests/Integration/Stores/LeastPrivilegeOutboxTest.php` `testAWriterWithTheOutboxGrantsRecordsDrainsAndReplays`,
+  `testTheMaintenanceUserPrunesAndDefersPendingDeliveries`
 - `tests/Integration/Stores/StoredEntryRoundTripTest.php` `testTimesStayUtcUnderNonUtcSessionAndApplicationTimeZones`,
   `testMicrosecondsSurviveIncludingTrailingZeros`
 - `tests/Performance/StoreQueryBudgetTest.php` `testStoringARecordIsOneInsert`,
@@ -1199,7 +1203,9 @@ COMMIT;
 - `tests/Feature/Console/LifecycleChecksTest.php` `testEachTableShapeProblemIsReported`,
   `testAMissingLockRowIsAProblem`, `testAMismatchedInstallationIsAProblem`, `testProjectionDriftIsAProblemNamingTheHolds`,
   `testTheJournalIsVerifiedWithoutTheLock`, `testAMissingInstallationIdIsAProblemAndIsNeverWritten`,
-  `testTheSeededInstallationIdIsOnlyRead`
+  `testTheSeededInstallationIdIsOnlyRead`, `testTheLockIsReadOnTheMaintenanceConnectionAlone`
+- `tests/Integration/Console/LeastPrivilegeCheckTest.php` `testTheCheckPassesUnderTheDocumentedGrants`,
+  `testTheFreshnessCheckPassesUnderTheDocumentedGrants`
 - `tests/Feature/Database/KeyTablesTest.php` `testTheDefaultsApplyWhenNothingIsSet`,
   `testANullOrEmptySettingIsItsDefault`, `testEachTableIsItsSetting`, `testRefusesANameOutsideTheGrammarNamingTheLeaf`,
   `testValidateNamesTheFirstBadLeaf`

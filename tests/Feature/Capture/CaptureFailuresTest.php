@@ -195,6 +195,29 @@ final class CaptureFailuresTest extends TestCase
     }
 
     /**
+     * A record made from an `AuditCaptureFailed` listener comes back unwritten
+     * and its refusal is reported once.
+     *
+     * @return void
+     */
+    public function testARecordInsideACaptureFailedListenerIsRefusedAndReported(): void
+    {
+        $inner = null;
+
+        Event::listen(AuditCaptureFailed::class, static function () use (&$inner): void {
+            $inner = AuditLog::record('ops.capture_failed');
+        });
+
+        self::assertNull(app(CaptureCoordinator::class)->mapped(new ExcludedPortalEvent));
+        self::assertSame('ops.capture_failed', $inner?->event);
+        self::assertSame([], $this->codes());
+        self::assertSame(
+            [CaptureFailedException::class, \LogicException::class],
+            array_map(static fn (\Throwable $report): string => $report::class, $this->reporter->reports()),
+        );
+    }
+
+    /**
      * A throwing reporter is contained and each failure is still dispatched
      * once.
      *

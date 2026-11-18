@@ -217,7 +217,8 @@ SELECT name, value, updated_at FROM audit_log_integrity_state ORDER BY name;
   missing lock row, a missing installation id, a maintenance connection that reaches another installation, a lifecycle
   journal that does not verify, holds projection drift and an anchor disk that is not configured. It notes, without
   failing, a hold whose review date has passed and an import batch left `running` for an hour. It writes nothing: the
-  migrations seed the installation id, and a check only reads it.
+  migrations seed the installation id, and a check only reads it. It reads the lock through the maintenance
+  connection, the only one granted it, so it needs the writer's and the maintenance user's credentials alike.
 - When the application's environment is `production`, `audit-log:check` also lists a `[production]` subject: the
   testing `FakeAuditStore` bound as the store, or as a destination of a stack, is a problem, since it keeps records in
   memory and loses them. A seal, sweep or verification schedule set to `null` or empty is a `[production] note:`,
@@ -393,12 +394,12 @@ of the sealer, from PHP. These measurements show one machine and claim nothing b
 
 | Run                             | Entries   | MySQL 8.4 | PostgreSQL 17 | Statements |
 |---------------------------------|-----------|-----------|---------------|------------|
-| Sweep sealing an unsealed table | 100,000   | 2.09 s    | 1.76 s        | 446        |
-| Sweep sealing an unsealed table | 1,000,000 | 21.45 s   | 21.82 s       | 4,406      |
-| Sweep of a sealed table         | 100,000   | 0.28 s    | 0.22 s        | 66         |
-| Sweep of a sealed table         | 1,000,000 | 3.45 s    | 10.23 s       | 606        |
-| Recent pass over a sealed table | 100,000   | 0.008 s   | 0.009 s       | 4          |
-| Recent pass over a sealed table | 1,000,000 | 0.017 s   | 0.007 s       | 4          |
+| Sweep sealing an unsealed table | 100,000   | 2.09 s    | 1.76 s        | 467        |
+| Sweep sealing an unsealed table | 1,000,000 | 21.45 s   | 21.82 s       | 4,607      |
+| Sweep of a sealed table         | 100,000   | 0.28 s    | 0.22 s        | 67         |
+| Sweep of a sealed table         | 1,000,000 | 3.45 s    | 10.23 s       | 607        |
+| Recent pass over a sealed table | 100,000   | 0.008 s   | 0.009 s       | 6          |
+| Recent pass over a sealed table | 1,000,000 | 0.017 s   | 0.007 s       | 6          |
 
 Each sweep read every entry once, in windows of at most 5,000 rows: 21 windows at 100,000 entries and 201 at 1,000,000.
 Sealing wrote 20 and 200 seals of 5,000 entries. The recent pass read the newest hour, 3,601 entries at 100,000 and

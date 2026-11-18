@@ -19,6 +19,7 @@ use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use Tests\Concerns\ExplainsStatements;
 use Tests\Concerns\ReadsTheTrail;
 use Tests\TestCase;
 
@@ -34,7 +35,7 @@ use Tests\TestCase;
 #[CoversNothing]
 final class TrailPlansTest extends TestCase
 {
-    use ReadsTheTrail;
+    use ExplainsStatements, ReadsTheTrail;
 
     /** @var int How many rows are stored; with fewer, MySQL scans and sorts. */
     private const int ROWS = 5000;
@@ -469,31 +470,6 @@ final class TrailPlansTest extends TestCase
     }
 
     /**
-     * The decoded and raw JSON plan MySQL or PostgreSQL gives the statement.
-     *
-     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
-     *
-     * @param  \Illuminate\Database\Connection  $connection
-     * @param  array{sql: string, bindings: array<array-key, scalar|null>}  $statement
-     * @return array{0: array<array-key, mixed>, 1: string}
-     *
-     * @throws \JsonException
-     */
-    private static function jsonExplain(Connection $connection, array $statement): array
-    {
-        $explain = $connection->getDriverName() === 'mysql' ? 'EXPLAIN FORMAT=JSON ' : 'EXPLAIN (FORMAT JSON) ';
-        $text    = array_values((array) $connection->selectOne($explain . $statement['sql'], $statement['bindings']))[0] ?? null;
-
-        self::assertIsString($text);
-
-        $tree = json_decode($text, true, 512, JSON_THROW_ON_ERROR);
-
-        self::assertIsArray($tree, $text);
-
-        return [$tree, $text];
-    }
-
-    /**
      * Store a key per owner and two key uses per row, for owners n and 7n + 3
      * modulo the owners, then analyse both tables.
      *
@@ -540,24 +516,6 @@ final class TrailPlansTest extends TestCase
 
         self::analyse($connection, KeyTables::subjectKeysTable());
         self::analyse($connection, KeyTables::keyUsesTable());
-    }
-
-    /**
-     * Analyse the table, so the planner chooses from the rows just stored.
-     *
-     * @param  \Illuminate\Database\Connection  $connection
-     * @param  string  $table
-     * @return void
-     */
-    private static function analyse(Connection $connection, string $table): void
-    {
-        $table = $connection->getQueryGrammar()->wrapTable($table);
-
-        match ($connection->getDriverName()) {
-            'mysql' => $connection->select('ANALYZE TABLE ' . $table),
-            'pgsql' => $connection->statement('ANALYZE ' . $table),
-            default => $connection->statement('ANALYZE'),
-        };
     }
 
     /**

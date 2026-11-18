@@ -119,6 +119,24 @@ final class SealQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
+     * A recent pass over sealed history with a high-water mark makes four reads
+     * and writes only its last run, never a seal.
+     *
+     * @return void
+     */
+    public function testASteadyStateRecentPassIsFourReadsAndOneWrite(): void
+    {
+        $this->storeEntries(5);
+        $this->sealer()->seal();
+
+        $result = $this->assertTransactionBudget(1, 1, fn (): SealResult => $this->assertStatementBudget(4, 1, 0, 0, fn (): SealResult => $this->sealer()->seal()));
+
+        self::assertSame(0, $result->seals());
+        self::assertSame([IntegrityTables::stateTable()], self::tablesWritten($this->capturedWrites()));
+        self::assertCount(1, $this->seals());
+    }
+
+    /**
      * An empty sweep makes four reads, then writes its completion, forgets its
      * cursor and writes its last run.
      *

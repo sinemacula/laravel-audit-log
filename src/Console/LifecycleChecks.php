@@ -104,8 +104,9 @@ final readonly class LifecycleChecks
     }
 
     /**
-     * Every lifecycle problem; table reads wait for the four tables' shapes,
-     * and a storage connection the `schema` subject reports is skipped.
+     * Every lifecycle problem; table reads wait for the storage tables' shapes,
+     * the lock is read on the maintenance connection once it reaches this
+     * installation, and a storage connection `schema` reports is skipped.
      *
      * @return list<string>
      *
@@ -129,13 +130,14 @@ final readonly class LifecycleChecks
             return [sprintf('The storage connection [%s] could not be read (%s).', $name, get_debug_type($exception))];
         }
 
-        $shaped = $tables === [];
+        $shaped       = $tables === [];
+        $installation = $shaped && $this->isMaintenanceCheckable() ? $this->installationProblems() : null;
 
         return [
             ...$tables,
-            ...($shaped ? $this->lockProblems($connection) : []),
+            ...($installation === [] ? $this->lockProblems(StorageConnection::resolvedMaintenanceName()) : []),
             ...($this->hasValidRetentionSettings() ? $this->policyProblems() : []),
-            ...($shaped && $this->isMaintenanceCheckable() ? $this->installationProblems() : []),
+            ...($installation ?? []),
             ...($shaped ? $this->journalProblems($connection) : []),
         ];
     }
@@ -159,8 +161,8 @@ final readonly class LifecycleChecks
     }
 
     /**
-     * The schema problems of the four lifecycle tables on the storage
-     * connection.
+     * The schema problems of the journal, holds and import batches tables on
+     * the storage connection.
      *
      * @param  string  $connection
      * @return list<string>
@@ -172,24 +174,29 @@ final readonly class LifecycleChecks
         return [
             ...$this->schemas->problems($connection, LifecycleTables::journalTable(), TableShape::journal()),
             ...$this->schemas->problems($connection, LifecycleTables::holdsTable(), TableShape::holds()),
-            ...$this->schemas->problems($connection, LifecycleTables::lockTable(), TableShape::lock()),
             ...$this->schemas->problems($connection, LifecycleTables::importBatchesTable(), TableShape::importBatches()),
         ];
     }
 
     /**
-     * The problem of a lock table without its one row, which no lifecycle
-     * operation could lock, or none.
+     * The problems of the lock table on the maintenance connection, the only
+     * one granted it: its shape, then a missing row, which nothing could lock.
      *
-     * @param  \Illuminate\Database\Connection  $connection
+     * @param  string  $connection
      * @return list<string>
      */
-    private function lockProblems(Connection $connection): array
+    private function lockProblems(string $connection): array
     {
         try {
-            $present = $connection->table(LifecycleTables::lockTable())->useWritePdo()->where('id', 1)->exists();
+            $shape = $this->schemas->problems($connection, LifecycleTables::lockTable(), TableShape::lock());
+
+            if ($shape !== []) {
+                return $shape;
+            }
+
+            $present = $this->database->connection($connection)->table(LifecycleTables::lockTable())->useWritePdo()->where('id', 1)->exists();
         } catch (\Exception $exception) {
-            return [sprintf(self::UNREADABLE, 'The lifecycle lock row', get_debug_type($exception))];
+            return [sprintf(self::UNREADABLE, 'The lifecycle lock', get_debug_type($exception))];
         }
 
         return $present ? [] : [LifecycleLockException::missing()->getMessage()];
