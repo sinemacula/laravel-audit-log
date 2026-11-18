@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Querying;
 
+use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Encryption\StringEncrypter;
 use Illuminate\Database\Events\QueryExecuted;
@@ -55,6 +56,12 @@ final class ExportVerifierTest extends TestCase
 
     /** @var string A key id no ring holds. */
     private const string UNKNOWN_KEY = 'unknown-key';
+
+    /** @var string The secret of the ring key an export is signed under. */
+    private const string FIRST_SECRET = 'a-first-secret-of-32-bytes-long!';
+
+    /** @var string The secret of the ring key rotated in after an export. */
+    private const string SECOND_SECRET = 'a-second-secret-of-32-bytes-ok!!';
 
     /** @var string The directory every test exports to, made for it alone. */
     private string $directory = '';
@@ -132,6 +139,39 @@ final class ExportVerifierTest extends TestCase
         self::assertSame([], $verification->findings);
         self::assertSame($result->entryId, $verification->entryId);
         self::assertSame(3, $verification->lines);
+    }
+
+    /**
+     * An export verifies after `app.key` and the ring rotate with the old keys
+     * kept, and its artifact is undecryptable once the old `app.key` is gone.
+     *
+     * @return void
+     */
+    public function testAnExportVerifiesAcrossAKeyRotation(): void
+    {
+        $config = app(ConfigRepository::class);
+        $old    = $config->string('app.key');
+
+        $config->set(['audit-log.integrity.keys' => ['k1' => self::FIRST_SECRET], 'audit-log.integrity.current' => 'k1']);
+
+        $this->export();
+
+        $config->set([
+            'app.key'                     => 'base64:' . base64_encode('a-rotated-application-key-32-byt'),
+            'app.previous_keys'           => [$old],
+            'audit-log.integrity.keys'    => ['k1' => self::FIRST_SECRET, 'k2' => self::SECOND_SECRET],
+            'audit-log.integrity.current' => 'k2',
+        ]);
+
+        app()->forgetInstance('encrypter');
+
+        self::assertTrue($this->verify()->isVerified());
+
+        $config->set('app.previous_keys', []);
+
+        app()->forgetInstance('encrypter');
+
+        self::assertSame([ExportFinding::ARTIFACT_UNDECRYPTABLE], $this->verify()->findings);
     }
 
     /**
