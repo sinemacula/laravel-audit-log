@@ -404,6 +404,33 @@ final class OutboxDrainerTest extends TestCase
     }
 
     /**
+     * With two destinations failing at the final attempt, the one report and
+     * the row name the last of them, and each receipt keeps its own class.
+     *
+     * @return void
+     */
+    public function testTheFinalFailureOfTwoDestinationsNamesTheLast(): void
+    {
+        $handler = $this->recordingHandler();
+
+        $this->bindStore(new StackAuditStore([
+            'archive' => CallbackStore::failingWith(new \DomainException('Down.'), participatesOn: []),
+            'siem'    => CallbackStore::failingWith(new \OverflowException('Down.'), participatesOn: []),
+        ]));
+
+        $id = $this->enqueue($this->finalisedRecord(), ['attempts' => 9]);
+
+        $this->drain();
+
+        $report = self::onlyReport($handler);
+
+        self::assertSame(['siem', \OverflowException::class], [$report->destination, $report->exceptionClass]);
+        self::assertSame(\OverflowException::class, $this->outboxRow($id)['last_error_class'] ?? null);
+        self::assertSame(\DomainException::class, $this->receipt($id, 'archive')['last_error_class'] ?? null);
+        self::assertSame(\OverflowException::class, $this->receipt($id, 'siem')['last_error_class'] ?? null);
+    }
+
+    /**
      * The final failure dispatches `AuditWriteFailed` once, with the record's
      * id and code, the destination's class and the failure's class.
      *
@@ -1298,16 +1325,17 @@ final class OutboxDrainerTest extends TestCase
     }
 
     /**
-     * Rows of `[whether the outbox has a connection of its own]`: a transaction
-     * on the storage connection, and one on a dedicated outbox connection.
+     * Rows of `[whether the outbox has a connection of its own, the connection
+     * the transaction is open on]`.
      *
-     * @return iterable<string, array{0: bool}>
+     * @return iterable<string, array{0: bool, 1: string}>
      */
     public static function provideTransactionConnections(): iterable
     {
         yield from [
-            'the storage connection'        => [false],
-            'a dedicated outbox connection' => [true],
+            'the storage connection'                       => [false, self::CONNECTION],
+            'a dedicated outbox connection'                => [true, self::MOVED_OUTBOX_CONNECTION],
+            'the storage connection beside its own outbox' => [true, self::CONNECTION],
         ];
     }
 
@@ -1316,10 +1344,11 @@ final class OutboxDrainerTest extends TestCase
      * row is claimed.
      *
      * @param  bool  $moved
+     * @param  string  $connection
      * @return void
      */
     #[DataProvider('provideTransactionConnections')]
-    public function testRefusesToRunInsideATransaction(bool $moved): void
+    public function testRefusesToRunInsideATransaction(bool $moved, string $connection): void
     {
         if ($moved) {
             $this->moveOutboxToItsOwnConnection();
@@ -1327,7 +1356,7 @@ final class OutboxDrainerTest extends TestCase
 
         $id = $this->enqueue($this->finalisedRecord());
 
-        DB::connection($moved ? self::MOVED_OUTBOX_CONNECTION : self::CONNECTION)->beginTransaction();
+        DB::connection($connection)->beginTransaction();
 
         try {
             $this->drain();
