@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature\Integrity;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\Query\Builder;
@@ -1060,8 +1061,9 @@ final class VerifierTest extends TestCase
     {
         $this->storeSeals(1);
 
-        $far  = $this->storeEntryAt('2099-01-01 00:00:00');
-        $near = $this->storeEntryAt('2026-11-02 04:59:59');
+        $far = $this->storeEntryAt('2099-01-01 00:00:00');
+
+        $this->storeEntryAt('2026-11-02 04:59:59');
 
         $summary = $this->verifyLog();
 
@@ -1072,7 +1074,35 @@ final class VerifierTest extends TestCase
         self::assertSame(0, $summary->overdue);
         self::assertSame(IntegrityStatus::INCOMPLETE, $summary->findings[0]->status());
         self::assertTrue($summary->fails(false));
-        self::assertNotSame($near, $far);
+    }
+
+    /**
+     * The overdue and future bounds follow the configured age and lookback: an
+     * entry at either bound is pending, one a microsecond past it a finding.
+     *
+     * @return void
+     */
+    public function testTheUnsealedBoundsFollowTheConfiguredSettings(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('audit-log.integrity.verify.max_unsealed_age_seconds', 600);
+        $config->set('audit-log.integrity.seal.lookback_seconds', 600);
+
+        $this->storeSeals(1);
+        $this->storeEntryAt('2026-11-02 03:50:00.000000');
+        $this->storeEntryAt('2026-11-02 04:10:00.000000');
+
+        $overdue = $this->storeEntryAt('2026-11-02 03:49:59.999999');
+        $future  = $this->storeEntryAt('2026-11-02 04:10:00.000001');
+
+        $summary = $this->verifyLog();
+
+        self::assertSame([Finding::OVERDUE_UNSEALED, Finding::FUTURE_UNSEALED], self::findingsOf($summary));
+        self::assertSame([$overdue, $future], array_column($summary->findings, 'firstBadId'));
+        self::assertSame([1, 1], array_column($summary->findings, 'count'));
+        self::assertSame(1, $summary->overdue);
+        self::assertSame(2, $summary->pending);
     }
 
     /**
