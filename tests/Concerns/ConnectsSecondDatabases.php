@@ -7,6 +7,7 @@ namespace Tests\Concerns;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
+use SineMacula\Laravel\AuditLog\Database\InstallationIdentity;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 
 /**
@@ -74,5 +75,21 @@ trait ConnectsSecondDatabases
         });
 
         $this->beforeApplicationDestroyed(static fn () => DB::connection(self::OTHER)->getSchemaBuilder()->dropIfExists(IntegrityTables::stateTable()));
+    }
+
+    /**
+     * Configure `OTHER` as a database of another installation.
+     *
+     * @return void
+     */
+    protected function anotherInstallation(): void
+    {
+        $this->otherDatabase();
+
+        DB::connection(self::OTHER)->table(IntegrityTables::stateTable())->insert([
+            'name'       => InstallationIdentity::NAME,
+            'value'      => json_encode(['id' => '01932b4e-9000-7000-8000-00000000abcd']),
+            'updated_at' => '2026-10-01 00:00:00.000000',
+        ]);
     }
 }

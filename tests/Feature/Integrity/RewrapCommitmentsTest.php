@@ -92,8 +92,9 @@ final class RewrapCommitmentsTest extends TestCase
         $commitments = new RewrapCommitments;
         $key         = $this->key();
         $superseded  = self::inState($key, KeyState::SUPERSEDED);
+        $after       = ['state' => 'superseded', 'wrap_key_id' => (string) $key->wrapKeyId, 'wrapped_digest' => (string) $key->wrappedDigest()];
 
-        $commitments->fold($this->journalRow(JournalKind::REINSTATE, ['keys' => [['key_id' => $key->id, 'after' => ['state' => 'superseded']]]]));
+        $commitments->fold($this->journalRow(JournalKind::REINSTATE, ['keys' => [['key_id' => $key->id, 'after' => $after]]]));
         $commitments->fold($this->journalRow(JournalKind::REWRAP, ['run_id' => 'r', 'rotate' => true, 'keys' => [
             ['key_id' => $key->id, 'after' => ['state' => 'superseded', 'wrap_key_id' => (string) $key->wrapKeyId]],
             ['key_id' => $key->id],
@@ -101,6 +102,7 @@ final class RewrapCommitmentsTest extends TestCase
         ], 'skipped' => []]));
 
         self::assertSame(Finding::KEY_SUBSTITUTED, $commitments->findingOf($superseded));
+        self::assertNull($commitments->findingOf($key));
     }
 
     /**

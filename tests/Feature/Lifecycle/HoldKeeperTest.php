@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature\Lifecycle;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\Events\TransactionBeginning;
@@ -13,8 +14,7 @@ use Illuminate\Database\Events\TransactionRolledBack;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
-use SineMacula\Laravel\AuditLog\Database\InstallationIdentity;
-use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
+use SineMacula\Laravel\AuditLog\Database\InstallationMismatchException;
 use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
@@ -35,6 +35,7 @@ use SineMacula\Laravel\AuditLog\Lifecycle\JournalReplay;
 use SineMacula\Laravel\AuditLog\Lifecycle\MaintenanceTransaction;
 use SineMacula\Laravel\AuditLog\Lifecycle\UnknownHoldException;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use Tests\Concerns\ConnectsSecondDatabases;
 use Tests\Concerns\WritesTheJournal;
 use Tests\TestCase;
 
@@ -50,7 +51,7 @@ use Tests\TestCase;
 #[CoversClass(HoldKeeper::class)]
 final class HoldKeeperTest extends TestCase
 {
-    use WritesTheJournal;
+    use ConnectsSecondDatabases, WritesTheJournal;
 
     /** @var string When every operation runs. */
     private const string NOW = '2026-11-02 09:00:00.123456';
@@ -131,19 +132,40 @@ final class HoldKeeperTest extends TestCase
     }
 
     /**
-     * Placing a hold confirms the installation first.
+     * A hold and a release through a maintenance connection that reaches
+     * another installation are refused, and the hold stays active.
      *
      * @return void
+     *
+     * @throws \Throwable
      */
-    public function testAHoldConfirmsTheInstallation(): void
+    public function testAHoldAndAReleaseRefuseAnotherInstallation(): void
     {
-        $state = DB::connection(StorageConnection::name())->table(IntegrityTables::stateTable())->where('name', InstallationIdentity::NAME);
+        $hold = $this->keeper()->place(self::OPERATION, HoldScope::all(), self::authority(), HoldBasis::OTHER, null);
 
-        (clone $state)->delete();
+        $this->anotherInstallation();
 
-        $this->keeper()->place(self::OPERATION, HoldScope::all(), self::authority(), HoldBasis::OTHER, null);
+        app(ConfigRepository::class)->set('audit-log.storage.maintenance_connection', self::OTHER);
 
-        self::assertSame(1, (clone $state)->count());
+        $operations = [
+            'hold'    => fn (): Hold => $this->keeper()->place(self::OPERATION, HoldScope::tenantless(), self::authority(), HoldBasis::OTHER, null),
+            'release' => fn (): Hold => $this->keeper()->release(self::OPERATION, $hold->id, self::authority()),
+        ];
+
+        foreach ($operations as $name => $operation) {
+            try {
+                $operation();
+
+                self::fail(sprintf('Expected the %s to be refused.', $name));
+            } catch (InstallationMismatchException) {
+                // The refusal under test
+            }
+        }
+
+        app(ConfigRepository::class)->set('audit-log.storage.maintenance_connection', null);
+
+        self::assertSame([$hold->id], array_map(static fn (Hold $active): string => $active->id, $this->keeper()->active()));
+        self::assertCount(1, $this->journalRows());
     }
 
     /**
