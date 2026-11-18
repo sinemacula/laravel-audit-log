@@ -63,9 +63,6 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
     /** @var string The table the installation id is kept in. */
     private const string STATE = 'audit_log_integrity_state';
 
-    /** @var int How many times a sync run's statements an outbox run may make. */
-    private const int OUTBOX_FACTOR = 2;
-
     /**
      * Register the command directly, keeping the test independent of the
      * provider.
@@ -280,25 +277,40 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
-     * An outbox run reads at most twice what a sync run does.
+     * An outbox run reads what a sync run does plus the schema of the outbox
+     * and deliveries tables, the same statements whatever those tables hold.
      *
      * @return void
      */
-    public function testAnOutboxRunReadsAtMostTwiceASyncRun(): void
+    public function testAnOutboxRunAddsOnlyTheDeliveryTableChecks(): void
     {
+        $database = $this->app?->make(DatabaseManager::class);
+
+        assert($database instanceof DatabaseManager);
+
         $this->capture(fn (): int => $this->check());
 
-        $sync = count($this->capturedStatements());
+        $sync = $this->capturedStatements();
+
+        $this->capture(static function () use ($database): void {
+            (new SchemaChecks($database))->problems(self::CONNECTION, 'audit_log_outbox', TableShape::outbox());
+            (new SchemaChecks($database))->problems(self::CONNECTION, 'audit_log_deliveries', TableShape::deliveries());
+        });
+
+        $tables = $this->capturedStatements();
 
         app(ConfigRepository::class)->set('audit-log.delivery.mode', 'outbox');
 
         self::assertSame(0, $this->capture(fn (): int => $this->check()));
 
-        $outbox     = count($this->capturedStatements());
-        $statements = implode(' | ', $this->capturedStatements());
+        $empty = $this->capturedStatements();
 
-        self::assertGreaterThan($sync, $outbox, "Statements: {$statements}");
-        self::assertLessThanOrEqual(self::OUTBOX_FACTOR * $sync, $outbox, "Statements: {$statements}");
+        self::assertSame(self::sorted([...$sync, ...$tables]), self::sorted($empty));
+
+        $this->seedDeliveryRows();
+
+        self::assertSame(0, $this->capture(fn (): int => $this->check()));
+        self::assertSame($empty, $this->capturedStatements());
     }
 
     /**
@@ -344,6 +356,28 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
     }
 
     /**
+     * Seed a due and a failed outbox row, and a delivered and an undelivered
+     * receipt.
+     *
+     * @return void
+     */
+    private function seedDeliveryRows(): void
+    {
+        $outbox  = ['payload' => 'payload', 'available_at' => self::NOW, 'created_at' => self::NOW];
+        $receipt = ['entry_id' => '0195f4a2-7b1c-7000-8000-000000000002', 'first_attempted_at' => self::NOW];
+
+        DB::table('audit_log_outbox')->insert([
+            ['id' => '0195f4a2-7b1c-7000-8000-000000000001', 'attempts' => 0, 'failed_at' => null, 'last_error_class' => null, ...$outbox],
+            ['id' => '0195f4a2-7b1c-7000-8000-000000000002', 'attempts' => 10, 'failed_at' => self::NOW, 'last_error_class' => \DomainException::class, ...$outbox],
+        ]);
+
+        DB::table('audit_log_deliveries')->insert([
+            ['destination' => 'first', 'attempts' => 1, 'delivered_at' => self::NOW, 'last_error_class' => null, ...$receipt],
+            ['destination' => 'second', 'attempts' => 3, 'delivered_at' => null, 'last_error_class' => \DomainException::class, ...$receipt],
+        ]);
+    }
+
+    /**
      * Store live keys of consecutive owners from the first given, fifty rows to
      * a statement.
      *
@@ -382,5 +416,18 @@ final class CheckCommandQueryBudgetTest extends PerformanceContractTestCase
         }
 
         return $rows;
+    }
+
+    /**
+     * The strings given, sorted bytewise.
+     *
+     * @param  list<string>  $strings
+     * @return list<string>
+     */
+    private static function sorted(array $strings): array
+    {
+        sort($strings, SORT_STRING);
+
+        return $strings;
     }
 }

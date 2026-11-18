@@ -57,12 +57,15 @@ use Tests\TestCase;
 final class BootQueryBudgetTest extends TestCase
 {
     /**
-     * A request that records nothing issues no queries.
+     * A request that records nothing issues no queries and opens no storage
+     * connection.
      *
      * @return void
      */
     public function testARequestThatRecordsNothingIssuesNoQueries(): void
     {
+        $this->useAnUnopenedStorageConnection();
+
         Route::get('/ping', static fn (): string => 'pong');
 
         DB::enableQueryLog();
@@ -70,6 +73,7 @@ final class BootQueryBudgetTest extends TestCase
         $this->get('/ping')->assertOk()->assertSee('pong');
 
         self::assertSame([], DB::getQueryLog());
+        self::assertArrayNotHasKey('audit_unopened', DB::getConnections());
     }
 
     /**
@@ -80,10 +84,7 @@ final class BootQueryBudgetTest extends TestCase
      */
     public function testResolvingTheStoreAndItsCollaboratorsIssuesNoQueries(): void
     {
-        $config = app(ConfigRepository::class);
-
-        $config->set('database.connections.audit_unopened', $config->array('database.connections.' . self::CONNECTION));
-        $config->set('audit-log.storage.connection', 'audit_unopened');
+        $this->useAnUnopenedStorageConnection();
 
         DB::enableQueryLog();
 
@@ -103,10 +104,7 @@ final class BootQueryBudgetTest extends TestCase
      */
     public function testResolvingTheRecorderAndItsCollaboratorsIssuesNoQueries(): void
     {
-        $config = app(ConfigRepository::class);
-
-        $config->set('database.connections.audit_unopened', $config->array('database.connections.' . self::CONNECTION));
-        $config->set('audit-log.storage.connection', 'audit_unopened');
+        $this->useAnUnopenedStorageConnection();
 
         DB::enableQueryLog();
 
@@ -126,10 +124,7 @@ final class BootQueryBudgetTest extends TestCase
      */
     public function testBootingWithCaptureWiredCostsNoQuery(): void
     {
-        $config = app(ConfigRepository::class);
-
-        $config->set('database.connections.audit_unopened', $config->array('database.connections.' . self::CONNECTION));
-        $config->set('audit-log.storage.connection', 'audit_unopened');
+        $this->useAnUnopenedStorageConnection();
 
         $catalogue = new EventCatalogue;
         $mappers   = new MapperRegistry;
@@ -174,10 +169,7 @@ final class BootQueryBudgetTest extends TestCase
      */
     public function testResolvingTheReadPathIssuesNoQueries(): void
     {
-        $config = app(ConfigRepository::class);
-
-        $config->set('database.connections.audit_unopened', $config->array('database.connections.' . self::CONNECTION));
-        $config->set('audit-log.storage.connection', 'audit_unopened');
+        $this->useAnUnopenedStorageConnection();
 
         DB::enableQueryLog();
 
@@ -198,10 +190,7 @@ final class BootQueryBudgetTest extends TestCase
      */
     public function testResolvingTheKeyPathIssuesNoQueries(): void
     {
-        $config = app(ConfigRepository::class);
-
-        $config->set('database.connections.audit_unopened', $config->array('database.connections.' . self::CONNECTION));
-        $config->set('audit-log.storage.connection', 'audit_unopened');
+        $this->useAnUnopenedStorageConnection();
 
         DB::enableQueryLog();
 
@@ -212,5 +201,19 @@ final class BootQueryBudgetTest extends TestCase
         self::assertStringStartsWith('d-', app(KeyWrapper::class)->currentKeyId());
         self::assertSame([], DB::getQueryLog());
         self::assertArrayNotHasKey('audit_unopened', DB::getConnections());
+    }
+
+    /**
+     * Point storage at a connection nothing has opened, so a test can show it
+     * stays unopened.
+     *
+     * @return void
+     */
+    private function useAnUnopenedStorageConnection(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('database.connections.audit_unopened', $config->array('database.connections.' . self::CONNECTION));
+        $config->set('audit-log.storage.connection', 'audit_unopened');
     }
 }
