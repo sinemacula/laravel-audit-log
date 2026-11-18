@@ -11,6 +11,7 @@ use Illuminate\Contracts\Filesystem\Factory;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\MySqlConnection;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Schema\MySqlBuilder;
 use Illuminate\Database\SQLiteDatabaseDoesNotExistException;
@@ -981,6 +982,30 @@ final class CheckCommandTest extends TestCase
             '[privacy] OK',
             self::SPILL_NOTE,
         ], $output);
+        self::assertStringNotContainsString($path, implode("\n", $output));
+    }
+
+    /**
+     * An unopenable maintenance connection is a problem named by its class.
+     *
+     * @return void
+     */
+    public function testAnUnreachableMaintenanceConnectionIsAProblemNamedByItsClass(): void
+    {
+        if (DB::connection(self::CONNECTION)->getDriverName() !== 'sqlite') {
+            self::markTestSkipped('Only SQLite fails to open a database that is a missing file.');
+        }
+
+        $path   = sys_get_temp_dir() . '/audit-log-missing-' . getmypid() . '.sqlite';
+        $config = app(ConfigRepository::class);
+
+        $config->set('database.connections.broken', ['driver' => 'sqlite', 'database' => $path, 'prefix' => '']);
+        $config->set('audit-log.storage.maintenance_connection', 'broken');
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame(['[lifecycle] The installation id could not be read (' . QueryException::class . ').'], self::problemsIn($output));
         self::assertStringNotContainsString($path, implode("\n", $output));
     }
 
