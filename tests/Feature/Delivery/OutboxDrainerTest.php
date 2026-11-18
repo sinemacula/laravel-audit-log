@@ -873,14 +873,18 @@ final class OutboxDrainerTest extends TestCase
 
     /**
      * The same failure at the last attempt fails the row, reported once and not
-     * twice, and never as abandoned.
+     * twice, never as abandoned, and dispatches `AuditWriteFailed` with the
+     * record's code.
      *
      * @return void
      */
     public function testAnUnexpectedFailureAtTheLastAttemptFailsTheRow(): void
     {
         $handler = $this->recordingHandler();
-        $bad     = $this->enqueue($this->finalisedRecord(), ['attempts' => 9]);
+
+        Event::fake([AuditWriteFailed::class]);
+
+        $bad = $this->enqueue($this->finalisedRecord(), ['attempts' => 9]);
 
         $this->failTheRenewalOf($bad, 1);
 
@@ -892,6 +896,13 @@ final class OutboxDrainerTest extends TestCase
         self::assertNotNull($row['failed_at']);
         self::assertSame(\DomainException::class, $row['last_error_class']);
         self::assertSame(\DomainException::class, self::onlyReport($handler)->exceptionClass);
+        self::assertSame('invoice.approved', self::onlyReport($handler)->eventCode);
+
+        Event::assertDispatchedTimes(AuditWriteFailed::class, 1);
+        Event::assertDispatched(AuditWriteFailed::class, static fn (AuditWriteFailed $event): bool => $event->id === $bad
+            && $event->code                                                                                      === 'invoice.approved'
+            && $event->store                                                                                     === Outbox::class
+            && $event->exception                                                                                 === \DomainException::class);
     }
 
     /**

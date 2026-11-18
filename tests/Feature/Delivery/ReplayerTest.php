@@ -526,6 +526,8 @@ final class ReplayerTest extends TestCase
 
         $this->anotherInstallation();
 
+        app(ConfigRepository::class)->set('audit-log.storage.maintenance_connection', self::OTHER);
+
         try {
             $this->replayer()->spill($path, false);
 
@@ -537,6 +539,24 @@ final class ReplayerTest extends TestCase
         self::assertSame(0, $this->entryCount());
         self::assertSame(0, $recorded);
         self::assertSame([0, 1, 0, 0, []], self::tally($this->replayer()->spill($path, true)));
+    }
+
+    /**
+     * An empty file replays nothing, and a non-empty file with no spill line is
+     * refused.
+     *
+     * @return void
+     */
+    public function testOnlyAnEmptyFileMayHoldNoSpillLine(): void
+    {
+        self::assertSame([0, 0, 0, 0, []], self::tally($this->replayer()->spill($this->file(''), false)));
+
+        $path = $this->file("\n");
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage(sprintf('The spill file [%s] holds no spill line.', $path));
+
+        $this->replayer()->spill($path, false);
     }
 
     /**

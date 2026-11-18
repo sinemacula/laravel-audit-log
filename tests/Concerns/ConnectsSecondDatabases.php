@@ -78,8 +78,7 @@ trait ConnectsSecondDatabases
     }
 
     /**
-     * Point the maintenance connection at `OTHER`, holding an installation id
-     * of its own.
+     * Configure `OTHER` as a database of another installation.
      *
      * @return void
      */
@@ -92,7 +91,5 @@ trait ConnectsSecondDatabases
             'value'      => json_encode(['id' => '01932b4e-9000-7000-8000-00000000abcd']),
             'updated_at' => '2026-10-01 00:00:00.000000',
         ]);
-
-        app(ConfigRepository::class)->set('audit-log.storage.maintenance_connection', self::OTHER);
     }
 }

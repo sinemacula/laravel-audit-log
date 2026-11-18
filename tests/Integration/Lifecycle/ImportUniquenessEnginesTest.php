@@ -9,6 +9,7 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\AuditLog\Console\LifecycleChecks;
 use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
@@ -238,7 +239,8 @@ final class ImportUniquenessEnginesTest extends TestCase
     }
 
     /**
-     * A killed import's batch stays running, then closes `interrupted`.
+     * A batch killed after its first chunk commits stays running with that
+     * chunk, is reported once stale, then closes `interrupted` keeping it.
      *
      * @return void
      */
@@ -246,9 +248,10 @@ final class ImportUniquenessEnginesTest extends TestCase
     {
         $path = $this->importFile(self::LINES);
 
+        // The second chunk's insert is the first to carry rec-101
         $this->assertKilled($this->runChild(function () use ($path): void {
             $this->importer()->import(ImportSource::fromFile($path, self::SOURCE), self::authority());
-        }, killAfter: '/insert into [`"]?' . EntrySettings::table() . '/i'));
+        }, killAfter: '/insert into [`"]?' . EntrySettings::table() . '\b.*\'rec-101\'/is'));
 
         $batches = DB::connection(StorageConnection::name())->table(LifecycleTables::importBatchesTable())->get()->all();
 
@@ -257,22 +260,29 @@ final class ImportUniquenessEnginesTest extends TestCase
         $batchId = (string) $batches[0]->id;
 
         self::assertSame('running', $batches[0]->status);
-        self::assertSame(0, $this->entries());
-        self::assertSame([], $this->staleIds());
+        self::assertSame(100, $this->entries());
+        self::assertSame([], $this->checks()->notes());
 
         CarbonImmutable::setTestNow(new CarbonImmutable('2026-11-02 10:00:01', 'UTC'));
 
-        self::assertSame([$batchId], $this->staleIds());
+        self::assertSame(
+            ["1 import batch is running with nothing written for over an hour: `{$batchId}`; close an interrupted one with `audit-log:import --close=<batch>`."],
+            $this->checks()->notes(),
+        );
 
         $result = $this->importer()->close($batchId, self::authority());
+        $batch  = app(ImportBatches::class)->find($batchId);
 
+        self::assertNotNull($batch);
         self::assertSame(ImportStatus::INTERRUPTED, $result->status);
-        self::assertSame('interrupted', app(ImportBatches::class)->find($batchId)['status'] ?? null);
+        self::assertSame('interrupted', $batch['status']);
+        self::assertSame([100, 100, 0, 0, 0], array_map(intval(...), [$batch['lines_read'], $batch['imported'], $batch['duplicates'], $batch['conflicts'], $batch['rejected']]));
+        self::assertSame(100, $this->entries());
 
         $kinds = DB::connection(StorageConnection::forMaintenance())->table(LifecycleTables::journalTable())->orderBy('sequence')->pluck('kind')->all();
 
         self::assertSame([JournalKind::IMPORT_STARTED->value, JournalKind::IMPORT_FINISHED->value], $kinds);
-        self::assertSame([], $this->staleIds());
+        self::assertSame([], $this->checks()->notes());
     }
 
     /**
@@ -464,15 +474,13 @@ final class ImportUniquenessEnginesTest extends TestCase
     }
 
     /**
-     * The ids of the stale batches, read afresh on every call.
+     * The lifecycle checks the container builds.
      *
-     * @return list<bool|float|int|string|null>
-     *
-     * @phpstan-impure
+     * @return \SineMacula\Laravel\AuditLog\Console\LifecycleChecks
      */
-    private function staleIds(): array
+    private function checks(): LifecycleChecks
     {
-        return array_column(app(ImportBatches::class)->stale(), 'id');
+        return app(LifecycleChecks::class);
     }
 
     /**

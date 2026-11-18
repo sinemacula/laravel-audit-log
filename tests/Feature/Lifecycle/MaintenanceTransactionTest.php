@@ -248,6 +248,8 @@ final class MaintenanceTransactionTest extends TestCase
     {
         $this->anotherInstallation();
 
+        app(ConfigRepository::class)->set('audit-log.storage.maintenance_connection', self::OTHER);
+
         $log = $this->statements();
 
         try {
