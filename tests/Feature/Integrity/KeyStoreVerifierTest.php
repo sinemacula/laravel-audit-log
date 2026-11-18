@@ -54,6 +54,9 @@ final class KeyStoreVerifierTest extends TestCase
     /** @var string A second id no key or entry has, after the first. */
     private const string OTHER_UNKNOWN_ID = '01932b4e-0000-7000-8000-00000000beef';
 
+    /** @var string The least UUID, which the first page of key uses must include. */
+    private const string NIL_UUID = '00000000-0000-0000-0000-000000000000';
+
     /** @var string The id of a hold that kept a key. */
     private const string HOLD_ID = '01932b4e-d000-7000-8000-000000000001';
 
@@ -284,16 +287,16 @@ final class KeyStoreVerifierTest extends TestCase
 
     /**
      * Key uses naming more missing keys than one page holds are each counted
-     * once, at the least id.
+     * once, at the least id, the nil UUID included.
      *
      * @return void
      */
     public function testEveryMissingKeyPastOnePageIsCounted(): void
     {
         $count = KeyStoreVerifier::PAGE + 1;
-        $uses  = [];
+        $uses  = [['key_id' => self::NIL_UUID, 'entry_id' => self::entryId()]];
 
-        for ($index = 0; $index < $count; $index++) {
+        for ($index = 1; $index < $count; $index++) {
             $uses[] = ['key_id' => Str::uuid7()->toString(), 'entry_id' => self::entryId()];
         }
 
@@ -301,13 +304,9 @@ final class KeyStoreVerifierTest extends TestCase
             $this->keyConnection()->table(KeyTables::keyUsesTable())->insert($chunk);
         }
 
-        $ids = array_column($uses, 'key_id');
-
-        sort($ids, SORT_STRING);
-
         [$summary, $tally] = $this->verify();
 
-        self::assertSame([Finding::KEY_MISSING->value => [$ids[0], $count]], self::findingsOf($tally));
+        self::assertSame([Finding::KEY_MISSING->value => [self::NIL_UUID, $count]], self::findingsOf($tally));
         self::assertSame($count, $summary->findings);
     }
 
@@ -709,8 +708,8 @@ final class KeyStoreVerifierTest extends TestCase
 
     /**
      * An owner reinstated under one integrity key and erased again under the
-     * next is judged by the later erasure: a key above the first floor that it
-     * did not keep is `key_restored`.
+     * next is judged by the later erasure: a key above the first floor, and a
+     * key only the first erasure kept, are each `key_restored`.
      *
      * @return void
      */
@@ -721,21 +720,27 @@ final class KeyStoreVerifierTest extends TestCase
         $owner = self::owner('42');
 
         $this->makeSubjectKey($owner);
-        $this->eraseByHand($owner);
+
+        [$kept] = $this->makeSubjectKey($owner, category: self::BILLING);
+
+        $this->eraseByHand($owner, [$kept->id => ['held:' . self::HOLD_ID]], true);
         $this->reinstateByHand($owner);
 
         [$next] = $this->makeSubjectKey($owner);
 
-        $before = $this->storedKey($next->id);
+        $before = [$next->id => $this->storedKey($next->id), $kept->id => $this->storedKey($kept->id)];
 
         $this->useRing('k2026');
         $this->eraseByHand($owner);
-        $this->changeKey($next->id, $before);
+
+        foreach ($before as $id => $columns) {
+            $this->changeKey($id, $columns);
+        }
 
         [, $tally] = $this->verify();
 
         self::assertSame(2, $next->generation);
-        self::assertSame([Finding::KEY_RESTORED->value => [$next->id, 1]], self::findingsOf($tally));
+        self::assertSame([Finding::KEY_RESTORED->value => [min($next->id, $kept->id), 2]], self::findingsOf($tally));
     }
 
     /**
