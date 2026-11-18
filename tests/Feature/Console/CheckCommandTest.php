@@ -778,7 +778,6 @@ final class CheckCommandTest extends TestCase
             '[integrity] The integrity state table `audit_log_integrity_state` does not exist on connection [fake]' . self::PUBLISH,
             '[lifecycle] The lifecycle journal table `audit_log_lifecycle` does not exist on connection [fake]' . self::PUBLISH,
             '[lifecycle] The holds table `audit_log_holds` does not exist on connection [fake]' . self::PUBLISH,
-            '[lifecycle] The lifecycle lock table `audit_log_lifecycle_lock` does not exist on connection [fake]' . self::PUBLISH,
             '[lifecycle] The import batches table `audit_log_import_batches` does not exist on connection [fake]' . self::PUBLISH,
             '[privacy] The subject keys table `audit_log_subject_keys` does not exist on connection [fake]' . self::PUBLISH,
             '[privacy] The owner erasures table `audit_log_owner_erasures` does not exist on connection [fake]' . self::PUBLISH,

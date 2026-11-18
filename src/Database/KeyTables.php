@@ -4,8 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\AuditLog\Database;
 
-use Illuminate\Support\Facades\Config;
-
 /**
  * The owners' key tables' names, all on the storage connection; an unset,
  * `null` or empty setting names the default, and a malformed one fails closed
@@ -50,7 +48,7 @@ final class KeyTables
      */
     public static function subjectKeysTable(): string
     {
-        return self::table(self::SUBJECT_KEYS_TABLE, self::DEFAULT_SUBJECT_KEYS);
+        return EntrySettings::configuredTable(self::SUBJECT_KEYS_TABLE, self::DEFAULT_SUBJECT_KEYS);
     }
 
     /**
@@ -62,7 +60,7 @@ final class KeyTables
      */
     public static function ownerErasuresTable(): string
     {
-        return self::table(self::OWNER_ERASURES_TABLE, self::DEFAULT_OWNER_ERASURES);
+        return EntrySettings::configuredTable(self::OWNER_ERASURES_TABLE, self::DEFAULT_OWNER_ERASURES);
     }
 
     /**
@@ -74,7 +72,7 @@ final class KeyTables
      */
     public static function keyUsesTable(): string
     {
-        return self::table(self::KEY_USES_TABLE, self::DEFAULT_KEY_USES);
+        return EntrySettings::configuredTable(self::KEY_USES_TABLE, self::DEFAULT_KEY_USES);
     }
 
     /**
@@ -89,22 +87,5 @@ final class KeyTables
         self::subjectKeysTable();
         self::ownerErasuresTable();
         self::keyUsesTable();
-    }
-
-    /**
-     * The table setting under the key, or the default when unset, `null` or
-     * empty, refused unless every index name derived from it fits.
-     *
-     * @param  string  $key
-     * @param  string  $default
-     * @return string
-     *
-     * @throws \InvalidArgumentException
-     */
-    private static function table(string $key, string $default): string
-    {
-        $table = Config::get($key);
-
-        return $table === null || $table === '' ? $default : EntrySettings::configuredTable($key, $default);
     }
 }

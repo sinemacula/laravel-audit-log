@@ -217,7 +217,8 @@ SELECT name, value, updated_at FROM audit_log_integrity_state ORDER BY name;
   missing lock row, a missing installation id, a maintenance connection that reaches another installation, a lifecycle
   journal that does not verify, holds projection drift and an anchor disk that is not configured. It notes, without
   failing, a hold whose review date has passed and an import batch left `running` for an hour. It writes nothing: the
-  migrations seed the installation id, and a check only reads it.
+  migrations seed the installation id, and a check only reads it. It reads the lock through the maintenance
+  connection, the only one granted it, so it needs the writer's and the maintenance user's credentials alike.
 - When the application's environment is `production`, `audit-log:check` also lists a `[production]` subject: the
   testing `FakeAuditStore` bound as the store, or as a destination of a stack, is a problem, since it keeps records in
   memory and loses them. A seal, sweep or verification schedule set to `null` or empty is a `[production] note:`,
