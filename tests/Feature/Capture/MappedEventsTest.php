@@ -44,6 +44,7 @@ use Tests\Fixtures\Capture\Mappers\FailClosedMapper;
 use Tests\Fixtures\Capture\Mappers\InvalidCodeMapper;
 use Tests\Fixtures\Capture\Mappers\NullMapper;
 use Tests\Fixtures\Capture\Mappers\OtherInstanceMapper;
+use Tests\Fixtures\Capture\Mappers\PackageCodeMapper;
 use Tests\Fixtures\Capture\Mappers\PortalMapper;
 use Tests\Fixtures\Capture\Mappers\RecapturingMapper;
 use Tests\Fixtures\Capture\Mappers\RecordingMapper;
@@ -409,6 +410,27 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
+     * A mapper records under a package capture code, whose definition keeps
+     * what it lists and drops the rest.
+     *
+     * @return void
+     */
+    #[DefineEnvironment('mapThePortalEventsToThePackageCode')]
+    public function testAMapperRecordsUnderAPackageCodeWithItsDefinition(): void
+    {
+        Event::dispatch(new SignedInToPortal);
+
+        $entry      = AuditEntry::query()->sole();
+        $properties = $entry->properties ?? [];
+
+        ksort($properties);
+
+        self::assertSame([CapturedActivity::SIGNED_IN->value, 'security', 1], [$entry->event, $entry->category, $entry->event_version]);
+        self::assertSame(['_audit' => ['omitted' => ['count' => 1, 'paths' => ['*']]], 'remember' => true], $properties);
+        self::assertSame([], $this->failures);
+    }
+
+    /**
      * A mapper naming an actor, and one naming none.
      *
      * @return iterable<string, array{object, ?string, ?string}>
@@ -540,6 +562,19 @@ final class MappedEventsTest extends TestCase
     {
         self::mapWhileBooting($app, static function (): void {
             AuditLog::map(PortalEvent::class, CoveringMapper::class);
+        });
+    }
+
+    /**
+     * Map the portal interface to the package code mapper while booting.
+     *
+     * @param  \Illuminate\Foundation\Application  $app
+     * @return void
+     */
+    protected function mapThePortalEventsToThePackageCode(Application $app): void
+    {
+        self::mapWhileBooting($app, static function (): void {
+            AuditLog::map(PortalEvent::class, PackageCodeMapper::class);
         });
     }
 
