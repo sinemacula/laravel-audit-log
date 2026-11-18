@@ -2069,6 +2069,8 @@ final class SegmentVerifierTest extends TestCase
     /**
      * Rows of `[the fields that hold the entry's only envelope]`.
      *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
      * @return iterable<string, array{0: array<string, mixed>}>
      *
      * @throws \JsonException
@@ -2084,6 +2086,8 @@ final class SegmentVerifierTest extends TestCase
     /**
      * An envelope in the IP address or the context is checked for its key use
      * as one in the properties is.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
      * @param  array<string, mixed>  $fields
      * @return void
@@ -2222,6 +2226,8 @@ final class SegmentVerifierTest extends TestCase
     /**
      * Store an entry at the instant with the fields given, with its key uses,
      * and return its id.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
      * @param  array<string, mixed>  $fields
      * @param  string  $at
