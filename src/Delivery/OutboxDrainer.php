@@ -474,11 +474,12 @@ final readonly class OutboxDrainer
     }
 
     /**
-     * Payload-free diagnostics of a failure working the row.
+     * Payload-free diagnostics of a failure working the row, with its event
+     * code once the record is read and `null` before.
      *
      * @param  \Throwable  $exception
      * @param  \SineMacula\Laravel\AuditLog\Delivery\OutboxClaim  $claim
-     * @param  ?string  $code  the record's event code, or `null` before it is read
+     * @param  ?string  $code
      * @return \SineMacula\Laravel\AuditLog\Stores\WriteDiagnostics
      */
     private function diagnosticsOf(#[\SensitiveParameter] \Throwable $exception, #[\SensitiveParameter] OutboxClaim $claim, ?string $code): WriteDiagnostics
