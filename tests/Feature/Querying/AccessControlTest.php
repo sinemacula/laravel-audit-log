@@ -176,17 +176,38 @@ final class AccessControlTest extends TestCase
     }
 
     /**
-     * Rows of `[what narrows the trail]`: filters that might widen a scope.
+     * Rows of `[what narrows the trail, fields of an in-scope entry it
+     * excludes]`: filters that might widen a scope.
      *
-     * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Querying\AuditTrail): \SineMacula\Laravel\AuditLog\Querying\AuditTrail}>
+     * @formatter:off
+     *
+     * @phpcs:disable Generic.Files.LineLength.TooLong
+     *
+     * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Querying\AuditTrail): \SineMacula\Laravel\AuditLog\Querying\AuditTrail, 1: array<string, string>}>
+     *
+     * @phpcs:enable Generic.Files.LineLength.TooLong
+     *
+     * @formatter:on
      */
     public static function provideEscapingFilters(): iterable
     {
         yield from [
-            'an actor'            => [static fn (AuditTrail $trail): AuditTrail => $trail->forActor(Reference::of('user', '7'))],
-            'an actor and a code' => [static fn (AuditTrail $trail): AuditTrail => $trail->forActor(Reference::of('user', '7'))->forEvent('invoice.approved', 'invoice.voided')],
-            'a code prefix'       => [static fn (AuditTrail $trail): AuditTrail => $trail->forEventsUnder('invoice.')],
-            'a correlation'       => [static fn (AuditTrail $trail): AuditTrail => $trail->correlatedWith('app:ticket-123')],
+            'an actor' => [
+                static fn (AuditTrail $trail): AuditTrail => $trail->forActor(Reference::of('user', '7')),
+                ['actor_id' => '8'],
+            ],
+            'an actor and a code' => [
+                static fn (AuditTrail $trail): AuditTrail => $trail->forActor(Reference::of('user', '7'))->forEvent('invoice.approved', 'invoice.voided'),
+                ['event' => 'invoice.paid'],
+            ],
+            'a code prefix' => [
+                static fn (AuditTrail $trail): AuditTrail => $trail->forEventsUnder('invoice.'),
+                ['event' => 'payment.captured'],
+            ],
+            'a correlation' => [
+                static fn (AuditTrail $trail): AuditTrail => $trail->correlatedWith('app:ticket-123'),
+                ['correlation_id' => 'app:ticket-456'],
+            ],
         ];
     }
 
@@ -195,10 +216,11 @@ final class AccessControlTest extends TestCase
      * page or in the count.
      *
      * @param  \Closure(\SineMacula\Laravel\AuditLog\Querying\AuditTrail): \SineMacula\Laravel\AuditLog\Querying\AuditTrail  $narrow
+     * @param  array<string, string>  $excluded
      * @return void
      */
     #[DataProvider('provideEscapingFilters')]
-    public function testACallerFilterCannotEscapeAMultiTenantScope(\Closure $narrow): void
+    public function testACallerFilterCannotEscapeAMultiTenantScope(\Closure $narrow, array $excluded): void
     {
         $this->allowTenants(self::tenant('org_01'), self::tenant('org_02'));
 
@@ -209,7 +231,7 @@ final class AccessControlTest extends TestCase
 
         $this->seedEntry(self::inTenant('org_03', ['actor_id' => '7']), self::at(2));
         $this->seedEntry(self::inTenant(null, ['actor_id' => '7']), self::at(3));
-        $this->seedEntry(self::inTenant('org_01', ['actor_id' => '8', 'event' => 'payment.captured', 'correlation_id' => 'app:ticket-456']), self::at(4));
+        $this->seedEntry(self::inTenant('org_01', $excluded + ['actor_id' => '7']), self::at(4));
 
         $trail = $narrow($this->financeTrail());
 

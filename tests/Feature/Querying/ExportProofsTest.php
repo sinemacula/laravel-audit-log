@@ -238,8 +238,8 @@ final class ExportProofsTest extends TestCase
     }
 
     /**
-     * An export journalled with no tenant verifies only under a scope that
-     * sees tenantless `audit` entries.
+     * An export journalled with no tenant verifies only under a scope that sees
+     * tenantless `audit` entries.
      *
      * @return void
      */
@@ -298,7 +298,9 @@ final class ExportProofsTest extends TestCase
     {
         $scope = AccessScope::tenants(Reference::of('organisation', self::TENANT));
 
-        $this->usePolicy(static fn (Authenticatable|Reference $viewer, ReadPurpose $purpose): AccessScope => $purpose === ReadPurpose::EXPORT ? $scope->exceptCategories('security') : $scope);
+        $this->usePolicy(
+            static fn (Authenticatable|Reference $viewer, ReadPurpose $purpose): AccessScope => $purpose === ReadPurpose::EXPORT ? $scope->exceptCategories('security') : $scope,
+        );
 
         $finance  = $this->seedEntry([], '2026-11-01T12:00:00.000001Z');
         $security = $this->seedEntry(['category' => 'security'], '2026-11-01T12:00:00.000002Z');

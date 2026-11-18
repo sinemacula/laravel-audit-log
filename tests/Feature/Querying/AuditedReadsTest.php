@@ -383,9 +383,11 @@ final class AuditedReadsTest extends TestCase
             $verification = $this->financeTrail()->verifyExport($path);
         } finally {
             foreach ([$path, $path . ExportFile::MANIFEST_SUFFIX] as $file) {
-                if (is_file($file)) {
-                    unlink($file);
+                if (!is_file($file)) {
+                    continue;
                 }
+
+                unlink($file);
             }
         }
 

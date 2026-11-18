@@ -537,9 +537,18 @@ final class AuditTrailTest extends TestCase
     }
 
     /**
-     * Rows of `[filter, fields of the entry it matches, fields of one it does not]`.
+     * Rows of `[filter, fields of the entry it matches, fields of one it does
+     * not]`.
+     *
+     * @formatter:off
+     *
+     * @phpcs:disable Generic.Files.LineLength.TooLong
      *
      * @return iterable<string, array{0: \Closure(\SineMacula\Laravel\AuditLog\Querying\AuditTrail): \SineMacula\Laravel\AuditLog\Querying\AuditTrail, 1: array<string, string>, 2: array<string, string>}>
+     *
+     * @phpcs:enable Generic.Files.LineLength.TooLong
+     *
+     * @formatter:on
      */
     public static function provideNarrowingFilters(): iterable
     {
