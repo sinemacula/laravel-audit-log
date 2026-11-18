@@ -159,7 +159,7 @@ code is defined for the watch, version 1, in the `change` category.
 
 - `src/Records/EventCode.php`: `of()`, `package()`, `forReading()`, `RESERVED_PREFIX`.
 - `src/Capture/Enums/CapturedActivity.php`: `definition()`.
-- `src/Querying/Enums/PackageActivity.php`: `definition()`, `isRead()`, `isProtected()`.
+- `src/Querying/Enums/PackageActivity.php`: `definition()`, `isProtected()`.
 - `src/Definitions/EventCatalogue.php`: `__construct()`.
 - `src/Capture/Enums/ModelEvent.php`: `codeFor()`, `eloquentEvent()`.
 
@@ -172,8 +172,7 @@ code is defined for the watch, version 1, in the `change` category.
 - `tests/Unit/Querying/Enums/PackageActivityTest.php` `testTheStoredValues`, `testEachIsUnderTheReservedPrefix`,
   `testEachDefinitionIsVersionOneInTheAuditCategoryDroppingWhatItDoesNotList`,
   `testEachLifecycleDefinitionKeepsExactlyItsProperties`, `testTheErasureCodesKeepExactlyTheirProperties`,
-  `testTheTrailReadKeepsItsRevealAndFieldCounts`, `testTheReadPathsReadsAreReads`, `testNoLifecycleCodeIsARead`,
-  `testNoPrivacyCodeIsAReadOrProtected`, `testOnlyTheExportIsProtected`
+  `testTheTrailReadKeepsItsRevealAndFieldCounts`, `testOnlyTheExportIsProtected`
 - `tests/Unit/Definitions/EventCatalogueTest.php` `testThePackageDefinitionsAreThereFromTheStart`,
   `testANewCatalogueHoldsOnlyThePackageDefinitions`, `testThePackageDefinitionsSurviveTheFreeze`
 - `tests/Unit/Capture/Enums/CapturedActivityTest.php` `testTheCodesAreTheVocabularys`, `testEveryCaseDefinesItsOwnCode`,

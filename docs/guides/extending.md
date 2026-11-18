@@ -32,8 +32,9 @@ or registered from a service provider's `boot()`; each contract's docblock says 
 
 An integration that binds over a contract only while it still holds the package's default asks
 `AuditLogServiceProvider::isPackageDefault($container, $contract)`: true while the contract resolves to the package's
-own default, resolved or not, and false for any binding made over it, even of the default's class, and for an instance
-of any other class.
+own default, resolved or not, and false for any binding made over it, even of the default's class, for an extender on
+it, and for an instance of any other class. An extender on a shared default already resolved replaces the held instance
+at once, so only the class it returns is seen.
 
 A store that keeps attachments, a bulk operation's subjects, a read's disclosure and an export's manifest, implements
 `Contracts\AcceptsAttachments` and returns `true` from `acceptsAttachments()` only when it keeps the attachment and its

@@ -276,6 +276,7 @@ promises is in `threat-model.md`; how a prune is verified is in `integrity.md`.
   record is completed as `pruned`, never stored and never delivered again, and counted. A fresh write mints a new id and
   is never checked. The spill replay checks and stores each record behind the lifecycle lock, so no prune commits
   between the two; a drained row's outbox row keeps its entry from every prune until the drain completes it.
+  `audit-log:reconcile` counts a lifecycle record retention pruned as already recorded and never writes it again.
 - A direct store of a pruned record is detected (`resurrected`), not prevented: an insert of a pruned id violates no
   index, so a record an application keeps and stores again by hand through `AuditStore::store()` is inserted, and
   verification reports the member a valid record covers that is present again as `resurrected`.
@@ -473,7 +474,8 @@ promises is in `threat-model.md`; how a prune is verified is in `integrity.md`.
   `testAFailedErasureIsRecordedWithACode`, `testTheBlocksAreBoundedAtFifty`
 - `tests/Feature/Lifecycle/ReconcilerTest.php` `testAMissingRecordIsRecordedAgain`,
   `testAnOperationRecordedAlreadyIsSkipped`, `testOnlyTheWindowIsReconciled`, `testNoJsonPathQueryIsIssued`,
-  `testAnErasureMissingItsRecordIsRecorded`, `testRewrapsAndReinstatementsAreReconciled`
+  `testAnErasureMissingItsRecordIsRecorded`, `testRewrapsAndReinstatementsAreReconciled`,
+  `testAPrunedRecordIsNeverWrittenAgain`
 - `tests/Unit/Lifecycle/ReconciledOperationsTest.php` `testARewrapRunIsSummedOverItsBatches`,
   `testARunWithABatchThatDescribesNoBatchIsNull`
 - `tests/Feature/Lifecycle/ErasureReapplierTest.php` `testEachOwnerIsErasedPartiallyWithPendingAccepted`,
@@ -482,13 +484,14 @@ promises is in `threat-model.md`; how a prune is verified is in `integrity.md`.
   `testAFileChangedDuringTheRunFails`
 - `tests/Feature/Console/EraseCommandTest.php` `testAFailurePrintsItsClassNotItsMessage`,
   `testAReapplyReconcilesTheRestore`
-- `tests/Unit/Querying/Enums/PackageActivityTest.php` `testOnlyTheExportIsProtected`, `testNoLifecycleCodeIsARead`
+- `tests/Unit/Querying/Enums/PackageActivityTest.php` `testOnlyTheExportIsProtected`
 - `tests/Feature/Lifecycle/AuditImporterTest.php` `testADryRunWritesNothing`, `testEveryColumnOfAnImportedRow`,
   `testTheBatchIsNotExternallyVerified`, `testImportedRowsAreNotDispatchedOrDelivered`,
   `testTheHoldIsPlacedBeforeTheFirstEntry`, `testTheStartAndTheHoldCommitTogether`,
   `testAJournalFailureAtStartFailsTheBatchAndWritesNoEntry`, `testOnFailureTheHoldStays`,
-  `testAFileChangedDuringTheImportFailsTheBatch`, `testItRefusesItsOwnSource`, `testAReimportAfterAPruneCreatesNewRows`,
-  `testCloseMarksARunningBatchInterruptedAndJournalsIt`, `testCloseRefusesAFinishedBatch`,
+  `testAFileChangedDuringTheImportFailsTheBatch`, `testItRefusesItsOwnSource`,
+  `testAReimportAfterTheStoredRowsAreGoneCreatesNewRows`, `testCloseMarksARunningBatchInterruptedAndJournalsIt`,
+  `testCloseRefusesAFinishedBatch`,
   `testEntriesAndTheBatchAreOnTheStorageWriterAndTheJournalOnTheMaintenanceConnection`
 - `tests/Feature/Lifecycle/ImportLineParserTest.php` `testEnvelopeShapedValuesAreDroppedAtAnyDepth`,
   `testAnEnvelopeShapedIpIsDropped`, `testTheFutureSkewIsTheSetting`

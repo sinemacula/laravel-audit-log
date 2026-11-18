@@ -122,7 +122,7 @@ final class LifecycleTablesTest extends TestCase
      * Rows of `[setting, value]`: per setting, the shapes a table name must not
      * take.
      *
-     * @return iterable<string, array{0: string, 1: int|list<string>|string|null}>
+     * @return iterable<string, array{0: string, 1: int|list<string>|string}>
      */
     public static function provideMalformedNames(): iterable
     {
@@ -133,8 +133,7 @@ final class LifecycleTablesTest extends TestCase
                 $setting . ': 48 characters'      => [$setting, str_repeat('a', 48)],
                 $setting . ': a leading digit'    => [$setting, '9a'],
                 $setting . ': an integer'         => [$setting, 42],
-                $setting . ': null'               => [$setting, null],
-                $setting . ': empty'              => [$setting, ''],
+                $setting . ': a space'            => [$setting, ' '],
                 $setting . ': a hyphen'           => [$setting, 'audit-holds'],
                 $setting . ': a list'             => [$setting, ['audit']],
                 $setting . ': a trailing newline' => [$setting, "audit\n"],
@@ -147,11 +146,11 @@ final class LifecycleTablesTest extends TestCase
      * names it takes, rather than falling back to the default.
      *
      * @param  string  $setting
-     * @param  int|list<string>|string|null  $value
+     * @param  int|list<string>|string  $value
      * @return void
      */
     #[DataProvider('provideMalformedNames')]
-    public function testRefusesAMalformedNameNamingTheKey(string $setting, array|int|string|null $value): void
+    public function testRefusesAMalformedNameNamingTheKey(string $setting, array|int|string $value): void
     {
         app(ConfigRepository::class)->set($setting, $value);
 

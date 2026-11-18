@@ -11,6 +11,7 @@ use Illuminate\Contracts\Filesystem\Factory;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\MySqlConnection;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Database\Schema\MySqlBuilder;
 use Illuminate\Database\SQLiteDatabaseDoesNotExistException;
@@ -777,7 +778,6 @@ final class CheckCommandTest extends TestCase
             '[integrity] The integrity state table `audit_log_integrity_state` does not exist on connection [fake]' . self::PUBLISH,
             '[lifecycle] The lifecycle journal table `audit_log_lifecycle` does not exist on connection [fake]' . self::PUBLISH,
             '[lifecycle] The holds table `audit_log_holds` does not exist on connection [fake]' . self::PUBLISH,
-            '[lifecycle] The lifecycle lock table `audit_log_lifecycle_lock` does not exist on connection [fake]' . self::PUBLISH,
             '[lifecycle] The import batches table `audit_log_import_batches` does not exist on connection [fake]' . self::PUBLISH,
             '[privacy] The subject keys table `audit_log_subject_keys` does not exist on connection [fake]' . self::PUBLISH,
             '[privacy] The owner erasures table `audit_log_owner_erasures` does not exist on connection [fake]' . self::PUBLISH,
@@ -981,6 +981,30 @@ final class CheckCommandTest extends TestCase
             '[privacy] OK',
             self::SPILL_NOTE,
         ], $output);
+        self::assertStringNotContainsString($path, implode("\n", $output));
+    }
+
+    /**
+     * An unopenable maintenance connection is a problem named by its class.
+     *
+     * @return void
+     */
+    public function testAnUnreachableMaintenanceConnectionIsAProblemNamedByItsClass(): void
+    {
+        if (DB::connection(self::CONNECTION)->getDriverName() !== 'sqlite') {
+            self::markTestSkipped('Only SQLite fails to open a database that is a missing file.');
+        }
+
+        $path   = sys_get_temp_dir() . '/audit-log-missing-' . getmypid() . '.sqlite';
+        $config = app(ConfigRepository::class);
+
+        $config->set('database.connections.broken', ['driver' => 'sqlite', 'database' => $path, 'prefix' => '']);
+        $config->set('audit-log.storage.maintenance_connection', 'broken');
+
+        [$code, $output] = $this->check();
+
+        self::assertSame(1, $code);
+        self::assertSame(['[lifecycle] The installation id could not be read (' . QueryException::class . ').'], self::problemsIn($output));
         self::assertStringNotContainsString($path, implode("\n", $output));
     }
 

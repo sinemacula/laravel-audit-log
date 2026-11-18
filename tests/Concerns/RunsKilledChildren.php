@@ -108,6 +108,7 @@ trait RunsKilledChildren
     protected function startChild(\Closure $work, ?string $killBefore = null, ?string $killAfter = null): int
     {
         if (!function_exists('pcntl_fork')) {
+            self::assertNotContains(getenv('DB_CONNECTION'), ['mysql', 'pgsql'], 'Killed child processes need pcntl.');
             self::markTestSkipped('Killed child processes need pcntl.');
         }
 

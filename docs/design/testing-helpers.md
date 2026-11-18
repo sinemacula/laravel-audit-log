@@ -153,7 +153,8 @@ and which belongs against a real database.
   `testAFailureListsWhatWasRecorded`, `testAFailureNamesNoProperty`, `testAssertingWithoutAFakeFails`
 - `tests/Feature/Facades/AuditLogTest.php` `testFakeBindsTheFakeAndReturnsIt`,
   `testFakeWorksAfterTheRecorderIsResolved`, `testRecordsReachTheFakeThroughThePipeline`,
-  `testADeferredRecordIsAbsentFromTheFakeUntilCommit`, `testARolledBackRecordIsAbsentFromTheFake`
+  `testADeferredRecordIsAbsentFromTheFakeUntilCommit`, `testARolledBackRecordIsAbsentFromTheFake`,
+  `testInOutboxModeARecordReachesTheFakeOnlyWhenDrained`
 - `tests/Feature/Recording/FakeParityTest.php` `testTheFakeHoldsTheRecordTheStoreReceived`,
   `testContributorsRunWithTheFake`, `testDeferralRunsWithTheFake`,
   `testAnImmediateRecordStaysInTheFakeAfterAHostRollback`, `testFailingPropagatesThroughTheRecorder`
@@ -166,6 +167,8 @@ and which belongs against a real database.
 - `tests/Integration/Delivery/TestingManagerTimingTest.php` `testTheWrapperIsNotSelected`,
   `testARecordInsideOnlyTheWrapperIsWrittenAtOnce`, `testANestedTransactionDefersToItsCommit`,
   `testATransactionalRecordIsAcceptedInsideOnlyTheWrapper`
+- `tests/Integration/Testing/ConsumerTestHarnessTest.php` `testARecordFromARouteIsStoredAtOnce`,
+  `testANestedRollbackDropsTheRecord`, `testACountReturnsAndIsRecorded`, `testAnExportVerifies`
 - `tests/Integration/Octane/RecorderRequestsTest.php` `testAFakeBoundInARequestDoesNotReachTheNext`
 - `tests/Performance/RecorderQueryBudgetTest.php` `testTheFakeCostsNoQueries`
 - `tests/Feature/AuditLogServiceProviderTest.php` `testRegistrationIsFrozenOnceBooted`

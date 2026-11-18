@@ -4,19 +4,24 @@ declare(strict_types = 1);
 
 namespace Tests\Integration\Stores;
 
+use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\DeadlockException;
+use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use SineMacula\Laravel\AuditLog\Stores\RecordConflictException;
+use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\Fixtures\Records\RecordFactory;
 use Tests\TestCase;
 
 /**
- * Integration tests for duplicates raced from separate processes.
+ * Integration tests for duplicates raced from separate processes or sessions.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -43,11 +48,15 @@ final class ConcurrentDuplicatesTest extends TestCase
     /** @var string The id both sides store under. */
     private const string ID = '01932b4e-8a40-7000-8000-000000000001';
 
+    /** @var string A second session on the worker's database. */
+    private const string READER = 'audit_reader';
+
     /** @var string Directory the second side reports its outcome in. */
     private string $outcomes;
 
     /**
-     * Prepare the outcomes directory; needs a shared server and `pcntl`.
+     * Prepare the outcomes directory; needs a shared server, and fails rather
+     * than skips on one without `pcntl`.
      *
      * @return void
      *
@@ -58,9 +67,11 @@ final class ConcurrentDuplicatesTest extends TestCase
     {
         parent::setUp();
 
-        if (DB::connection()->getDriverName() === 'sqlite' || !function_exists('pcntl_fork')) {
-            self::markTestSkipped('Racing processes need a shared database server and pcntl.');
+        if (DB::connection()->getDriverName() === 'sqlite') {
+            self::markTestSkipped('Racing processes need a shared database server.');
         }
+
+        self::assertTrue(function_exists('pcntl_fork'), 'Racing processes need pcntl.');
 
         $this->outcomes = sys_get_temp_dir() . '/audit-duplicate-race-' . bin2hex(random_bytes(8));
 
@@ -187,6 +198,52 @@ final class ConcurrentDuplicatesTest extends TestCase
     }
 
     /**
+     * Rows of `[isolation level]`: each level whose snapshot PostgreSQL keeps
+     * for the whole transaction.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function provideSnapshotLevels(): iterable
+    {
+        yield from [
+            'repeatable read' => ['repeatable read'],
+            'serializable'    => ['serializable'],
+        ];
+    }
+
+    /**
+     * On PostgreSQL, a duplicate committed after a host's snapshot is the
+     * original violation, and the host stays usable.
+     *
+     * @param  string  $level
+     * @return void
+     */
+    #[DataProvider('provideSnapshotLevels')]
+    public function testOnPostgresADuplicateBeyondTheHostSnapshotIsNeverASuccess(string $level): void
+    {
+        if (DB::connection()->getDriverName() !== 'pgsql') {
+            self::markTestSkipped('Only PostgreSQL hides a committed duplicate from the host snapshot.');
+        }
+
+        $finalised = $this->finalised('1200.00');
+        $host      = DB::connection();
+
+        $host->beginTransaction();
+        $host->statement("set transaction isolation level {$level}");
+        $host->table(EntrySettings::table())->count();
+
+        DB::connection(self::READER)->table(EntrySettings::table())->insert((new RowCodec)->encode($finalised));
+
+        $this->assertThrows(fn () => $this->store()->store($finalised), UniqueConstraintViolationException::class);
+
+        self::assertSame(0, $host->table(EntrySettings::table())->count());
+
+        $host->commit();
+
+        self::assertSame(1, $this->entryCount());
+    }
+
+    /**
      * Two writers of one bundle leave one entry and one artifact.
      *
      * @return void
@@ -201,6 +258,26 @@ final class ConcurrentDuplicatesTest extends TestCase
         self::assertSame(1, $this->entryCount());
         self::assertSame(1, $this->storageConnection()->table(EntrySettings::artifactsTable())->count());
         self::assertSame($bundle->hmac, $this->storedRow($bundle->record->id)['hmac']);
+    }
+
+    /**
+     * Register a second session on the worker's database.
+     *
+     * @param  mixed  $app
+     * @return void
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     */
+    #[\Override]
+    protected function defineEnvironment(mixed $app): void
+    {
+        parent::defineEnvironment($app);
+
+        assert($app instanceof Application);
+
+        $config = $app->make(ConfigRepository::class);
+
+        $config->set('database.connections.' . self::READER, $config->array('database.connections.' . self::CONNECTION));
     }
 
     /**

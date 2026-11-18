@@ -5,29 +5,35 @@ declare(strict_types = 1);
 namespace Tests\Integration\Keys;
 
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Database\Connection;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
+use SineMacula\Laravel\AuditLog\Keys\KeyCreator;
 use SineMacula\Laravel\AuditLog\Keys\KeySession;
+use SineMacula\Laravel\AuditLog\Keys\KeyUnit;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Concerns\MakesSubjectKeys;
+use Tests\Concerns\RunsInsideTheTestingWrapper;
 use Tests\Concerns\RunsKilledChildren;
 use Tests\TestCase;
 
 /**
  * Integration tests for the key session: it outlives a host rollback on MySQL
- * and PostgreSQL, rolls back with it on SQLite, and uses the writer alone.
+ * and PostgreSQL, rolls back with it on SQLite, uses the writer alone, and on
+ * PostgreSQL refuses a key inside a transaction not at `read committed`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
  */
+#[CoversClass(KeyCreator::class)]
 #[CoversClass(KeySession::class)]
 final class KeySessionEnginesTest extends TestCase
 {
-    use MakesSubjectKeys, RunsKilledChildren;
+    use MakesSubjectKeys, RunsInsideTheTestingWrapper, RunsKilledChildren;
 
     /** @var string A connection whose writer is the storage connection's and whose reader cannot be reached. */
     private const string SPLIT = 'key_session_split';
@@ -151,6 +157,33 @@ final class KeySessionEnginesTest extends TestCase
 
         self::assertTrue(DB::connection(self::CONNECTION)->table(KeyTables::subjectKeysTable())->where('id', $key->id)->exists());
         self::assertInstanceOf(\Closure::class, DB::connection(self::SPLIT)->getRawReadPdo(), 'The replica was asked for.');
+    }
+
+    /**
+     * On PostgreSQL a key is refused inside a testing transaction at
+     * `repeatable read`, which the session shares, and none is stored.
+     *
+     * @return void
+     */
+    public function testOnPostgresAKeyIsRefusedAtRepeatableRead(): void
+    {
+        $storage = DB::connection(StorageConnection::name());
+
+        if ($storage->getDriverName() !== 'pgsql') {
+            self::markTestSkipped('Only PostgreSQL sets the isolation a key is created at.');
+        }
+
+        $this->insideTheTestingWrapper($storage, function (Connection $connection): void {
+            $connection->statement('set transaction isolation level repeatable read');
+
+            $this->assertThrows(
+                fn () => $this->keyCreator()->create(new KeyUnit(Reference::of('App\Models\User', '42'), null, self::KEY_CATEGORY)),
+                \UnexpectedValueException::class,
+                'A key is created at `read committed` alone, and the transaction it would be created in is not.',
+            );
+
+            self::assertSame(0, $connection->table(KeyTables::subjectKeysTable())->count());
+        });
     }
 
     /**
