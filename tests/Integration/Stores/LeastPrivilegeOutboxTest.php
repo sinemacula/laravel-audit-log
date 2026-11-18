@@ -139,8 +139,8 @@ final class LeastPrivilegeOutboxTest extends TestCase
     }
 
     /**
-     * The writer records into the outbox, fails a drain, and replays the row
-     * to one stored entry with a delivered receipt.
+     * The writer records into the outbox, fails a drain, and replays the row to
+     * one stored entry with a delivered receipt.
      *
      * @return void
      */
@@ -201,9 +201,11 @@ final class LeastPrivilegeOutboxTest extends TestCase
             'created_at'   => '2026-12-02 12:00:00.000000',
         ]);
 
+        $receipt = ['destination' => 'siem', 'attempts' => 1, 'first_attempted_at' => '2026-12-02 12:00:01.000000', 'last_error_class' => null];
+
         $this->root()->table(DeliveryTables::deliveriesTable())->insert([
-            ['entry_id' => $undelivered, 'destination' => 'siem', 'attempts' => 3, 'first_attempted_at' => '2026-12-02 12:00:01.000000', 'delivered_at' => null, 'last_error_class' => \RuntimeException::class],
-            ['entry_id' => $delivered, 'destination' => 'siem', 'attempts' => 1, 'first_attempted_at' => '2026-12-02 12:00:01.000000', 'delivered_at' => '2026-12-02 12:00:02.000000', 'last_error_class' => null],
+            [...$receipt, 'entry_id' => $undelivered, 'delivered_at' => null],
+            [...$receipt, 'entry_id' => $delivered, 'delivered_at' => '2026-12-02 12:00:02.000000'],
         ]);
 
         $result = AuditLog::lifecycle()->prune();
