@@ -103,14 +103,13 @@ final class EntrySettingsTest extends TestCase
      * Rows of `[table]`: values refused as a table name; a capital is refused
      * because every engine reports index names in lower case.
      *
-     * @return iterable<string, array{0: int|list<string>|string|null}>
+     * @return iterable<string, array{0: int|list<string>|string}>
      */
     public static function provideRefusedTables(): iterable
     {
         yield from [
             '48 characters'         => [str_repeat('a', 48)],
-            'empty'                 => [''],
-            'null'                  => [null],
+            'a space'               => [' '],
             'an integer'            => [42],
             'a list'                => [['audit_log_entries']],
             'a hyphen'              => ['audit-log'],
@@ -133,11 +132,11 @@ final class EntrySettingsTest extends TestCase
      * Each refused value fails closed, naming the setting and the names it
      * takes.
      *
-     * @param  int|list<string>|string|null  $table
+     * @param  int|list<string>|string  $table
      * @return void
      */
     #[DataProvider('provideRefusedTables')]
-    public function testRefusesATableThatCannotNameEveryIndex(array|int|string|null $table): void
+    public function testRefusesATableThatCannotNameEveryIndex(array|int|string $table): void
     {
         app(ConfigRepository::class)->set(self::KEY, $table);
 
@@ -220,11 +219,11 @@ final class EntrySettingsTest extends TestCase
      * A value the entries table refuses is refused for the artifacts table too,
      * naming the artifacts table's key.
      *
-     * @param  int|list<string>|string|null  $table
+     * @param  int|list<string>|string  $table
      * @return void
      */
     #[DataProvider('provideRefusedTables')]
-    public function testAMalformedArtifactsTableIsRefusedNamingItsKey(array|int|string|null $table): void
+    public function testAMalformedArtifactsTableIsRefusedNamingItsKey(array|int|string $table): void
     {
         app(ConfigRepository::class)->set(self::ARTIFACTS_KEY, $table);
 

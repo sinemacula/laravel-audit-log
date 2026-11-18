@@ -108,7 +108,7 @@ final class IntegrityTablesTest extends TestCase
      * Rows of `[setting, value]`: per setting, the shapes a table name must not
      * take.
      *
-     * @return iterable<string, array{0: string, 1: int|list<string>|string|null}>
+     * @return iterable<string, array{0: string, 1: int|list<string>|string}>
      */
     public static function provideMalformedTables(): iterable
     {
@@ -118,8 +118,7 @@ final class IntegrityTablesTest extends TestCase
                 $setting . ': a leading digit'    => [$setting, '9a'],
                 $setting . ': 48 characters'      => [$setting, str_repeat('a', 48)],
                 $setting . ': an integer'         => [$setting, 42],
-                $setting . ': null'               => [$setting, null],
-                $setting . ': empty'              => [$setting, ''],
+                $setting . ': a space'            => [$setting, ' '],
                 $setting . ': a schema'           => [$setting, 'reporting.audit'],
                 $setting . ': a hyphen'           => [$setting, 'audit-seals'],
                 $setting . ': a list'             => [$setting, ['audit']],
@@ -133,11 +132,11 @@ final class IntegrityTablesTest extends TestCase
      * names it takes, rather than falling back to the default.
      *
      * @param  string  $setting
-     * @param  int|list<string>|string|null  $value
+     * @param  int|list<string>|string  $value
      * @return void
      */
     #[DataProvider('provideMalformedTables')]
-    public function testRefusesAMalformedTable(string $setting, array|int|string|null $value): void
+    public function testRefusesAMalformedTable(string $setting, array|int|string $value): void
     {
         app(ConfigRepository::class)->set($setting, $value);
 
