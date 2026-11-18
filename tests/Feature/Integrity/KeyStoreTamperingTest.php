@@ -14,13 +14,17 @@ use SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 use SineMacula\Laravel\AuditLog\Database\KeyTables;
+use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use SineMacula\Laravel\AuditLog\Events\IntegrityCheckFailed;
 use SineMacula\Laravel\AuditLog\Integrity\Anchors\NullAnchor;
+use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\KeyState;
+use SineMacula\Laravel\AuditLog\Integrity\JournalRow;
 use SineMacula\Laravel\AuditLog\Integrity\KeyStoreVerifier;
 use SineMacula\Laravel\AuditLog\Integrity\NullPruneLedger;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Integrity\SegmentVerifier;
+use SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow;
 use SineMacula\Laravel\AuditLog\Lifecycle\Authority;
 use SineMacula\Laravel\AuditLog\Lifecycle\Rewrapper;
 use SineMacula\Laravel\AuditLog\Privacy\EncryptedField;
@@ -66,6 +70,9 @@ final class KeyStoreTamperingTest extends TestCase
 
     /** @var string The value every field seals. */
     private const string SECRET = '4242';
+
+    /** @var string The id of a hold that kept a key. */
+    private const string HOLD_ID = '01932b4e-d000-7000-8000-000000000001';
 
     /** @var list<string> The columns that hold a key, and that an erasure changes. */
     private const array KEY_COLUMNS = ['state', 'wrapped_key', 'wrap_key_id', 'erasure_id'];
@@ -293,6 +300,89 @@ final class KeyStoreTamperingTest extends TestCase
 
         self::assertSame(1, $exit);
         self::assertSame(['key_substituted' => [$key->id, 1]], $findings);
+    }
+
+    /**
+     * A rewrap row listing a flipped key as superseded legitimises nothing when
+     * its signature fails, or when it is signed for another log: the key is
+     * `key_substituted`.
+     *
+     * @return void
+     */
+    public function testAForgedRewrapRowDoesNotLegitimiseAFlippedState(): void
+    {
+        [$key] = $this->makeSubjectKey(self::owner('42'));
+
+        $this->changeKey($key->id, ['state' => KeyState::SUPERSEDED->value]);
+
+        $forged = $this->rewrapRowOf($key);
+
+        $this->tamperJournal($forged->sequence, ['hmac' => str_repeat('e', 64)]);
+
+        [, , $unsigned] = $this->verify();
+
+        $this->keyConnection()->table(LifecycleTables::journalTable())->delete();
+
+        $config = app(ConfigRepository::class);
+        $logId  = $config->get('audit-log.integrity.log_id');
+
+        $config->set('audit-log.integrity.log_id', 'another-log');
+
+        $this->rewrapRowOf($key);
+
+        $config->set('audit-log.integrity.log_id', $logId);
+
+        [, , $otherLog] = $this->verify();
+
+        self::assertSame([$key->id, 1], $unsigned['key_substituted'] ?? null);
+        self::assertSame([$key->id, 1], $otherLog['key_substituted'] ?? null);
+    }
+
+    /**
+     * A key a partial erasure kept stays clean once a rotation supersedes it,
+     * while the key it destroyed put back is `key_restored`.
+     *
+     * @return void
+     */
+    public function testAKeptKeySupersededByARotationStaysClean(): void
+    {
+        $owner = self::owner('42');
+
+        [$destroyed] = $this->makeSubjectKey($owner);
+        [$kept]      = $this->makeSubjectKey($owner, category: 'billing');
+
+        $before = $this->storedKey($destroyed->id);
+
+        $this->eraseByHand($owner, [$kept->id => ['held:' . self::HOLD_ID]], true);
+        $this->rotate();
+
+        [$exit, , $findings] = $this->verify();
+
+        self::assertSame(KeyState::SUPERSEDED->value, $this->storedKey($kept->id)['state']);
+        self::assertSame([0, []], [$exit, $findings]);
+
+        $this->changeKey($destroyed->id, $before);
+
+        [$exit, , $findings] = $this->verify();
+
+        self::assertSame(1, $exit);
+        self::assertSame(['key_restored' => [$destroyed->id, 1]], $findings);
+    }
+
+    /**
+     * Append a signed rewrap row listing the key superseded with its wrapping
+     * unchanged, as a rotation would.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow  $key
+     * @return \SineMacula\Laravel\AuditLog\Integrity\JournalRow
+     */
+    private function rewrapRowOf(SubjectKeyRow $key): JournalRow
+    {
+        $before = ['state' => KeyState::LIVE->value, 'wrapped_digest' => $key->wrappedDigest(), 'wrap_key_id' => $key->wrapKeyId];
+        $after  = [...$before, 'state' => KeyState::SUPERSEDED->value];
+        $listed = [['key_id' => $key->id, 'before' => $before, 'after' => $after]];
+
+        return $this->journalRow(JournalKind::REWRAP, ['run_id' => (string) Str::uuid7(), 'rotate' => true, 'keys' => $listed, 'skipped' => []]);
     }
 
     /**

@@ -177,6 +177,66 @@ final class ErasureBlocksTest extends TestCase
     }
 
     /**
+     * Preservation is decided by the key's tenant, so only the preserved
+     * tenant's key is kept.
+     *
+     * @return void
+     */
+    public function testPreservationIsDecidedPerTenant(): void
+    {
+        $policy = new class implements RetentionPolicy {
+            /**
+             * The policy's version.
+             *
+             * @return string
+             */
+            #[\Override]
+            public function version(): string
+            {
+                return 'per-tenant';
+            }
+
+            /**
+             * Forever for every category.
+             *
+             * @param  string  $category
+             * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $tenant
+             * @return ?int
+             */
+            #[\Override]
+            public function retainFor(string $category, ?Reference $tenant): ?int
+            {
+                return null;
+            }
+
+            /**
+             * Forever for `org_01`, and nothing for any other tenant.
+             *
+             * @param  string  $category
+             * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $tenant
+             * @return ?int
+             */
+            #[\Override]
+            public function preserveFor(string $category, ?Reference $tenant): ?int
+            {
+                return $tenant?->id === 'org_01' ? PHP_INT_MAX : null;
+            }
+        };
+
+        [$preserved] = $this->makeSubjectKey(self::owner(), self::tenant(), self::CATEGORY);
+        [$other]     = $this->makeSubjectKey(self::owner(), Reference::of('organisation', 'org_02'), self::CATEGORY);
+
+        $this->seedEncrypted($preserved);
+        $this->seedEncrypted($other, ['tenant_id' => 'org_02']);
+
+        [$blocks, $affected] = app(ErasureBlocks::class)->for($this->connection(), [$preserved, $other], [], new RetentionDecisions($policy, CarbonImmutable::now()));
+
+        self::assertCount(1, $blocks);
+        self::assertSame([$preserved->id, ['preserved:' . self::CATEGORY]], [$blocks[0]->keyId, $blocks[0]->reasons]);
+        self::assertSame(1, $affected);
+    }
+
+    /**
      * Another category's preservation blocks nothing.
      *
      * @return void

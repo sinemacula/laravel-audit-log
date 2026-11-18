@@ -12,7 +12,9 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\KeyTables;
 use SineMacula\Laravel\AuditLog\Keys\KeyUseRebuilder;
+use SineMacula\Laravel\AuditLog\Keys\KeyUses;
 use SineMacula\Laravel\AuditLog\Lifecycle\KeyUseRebuildResult;
+use SineMacula\Laravel\AuditLog\Records\AuditRecord;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\Fixtures\Records\RecordFactory;
@@ -51,6 +53,27 @@ final class KeyUseRebuilderTest extends TestCase
 
         self::assertSame(self::sorted([[$card, $first], [$item, $first], [$card, $second], [$kept, $second]]), $this->storedUses());
         self::assertSame(['entries' => 2, 'verified' => 2, 'skipped' => 0, 'added' => 3, 'dry_run' => false], $result->toArray());
+    }
+
+    /**
+     * An envelope in the context or an encrypted IP address gets its key use,
+     * as one in the properties does.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testEnvelopesInTheContextAndTheIpAreAdded(): void
+    {
+        [$context, $ip] = [self::keyId(), self::keyId()];
+
+        $inContext = $this->storeRecord(RecordFactory::withFields(['context' => ['route' => 'invoices.approve', 'payment' => ['card' => self::envelope($context)]]]));
+        $inIp      = $this->storeRecord(RecordFactory::withFields(['ip' => json_encode(self::envelope($ip), JSON_THROW_ON_ERROR)]));
+
+        $result = $this->rebuilder()->rebuild();
+
+        self::assertSame(self::sorted([[$context, $inContext], [$ip, $inIp]]), $this->storedUses());
+        self::assertSame(['entries' => 2, 'verified' => 2, 'skipped' => 0, 'added' => 2, 'dry_run' => false], $result->toArray());
     }
 
     /**
@@ -153,6 +176,28 @@ final class KeyUseRebuilderTest extends TestCase
     }
 
     /**
+     * A page whose entry ids take more than one statement on SQLite still finds
+     * every stored key use, so none is added again.
+     *
+     * @return void
+     */
+    public function testStoredUsesAcrossSqliteChunksAreNotAddedAgain(): void
+    {
+        $uses = [];
+
+        for ($entry = 0; $entry <= KeyUses::SQLITE_ROWS_PER_STATEMENT; $entry++) {
+            $key    = self::keyId();
+            $uses[] = [$key, $this->storeEntry(['card' => self::envelope($key)])];
+        }
+
+        $this->insertUses($uses);
+
+        $result = $this->rebuilder()->rebuild();
+
+        self::assertSame(['entries' => 401, 'verified' => 401, 'skipped' => 0, 'added' => 0, 'dry_run' => false], $result->toArray());
+    }
+
+    /**
      * An empty entries table reads one page and adds nothing.
      *
      * @return void
@@ -163,8 +208,8 @@ final class KeyUseRebuilderTest extends TestCase
     }
 
     /**
-     * Sign a captured record of the properties as the store signs it, insert it
-     * as the store inserts it without its key uses, and return its id.
+     * Store a captured record of the properties without its key uses, and
+     * return its id.
      *
      * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
      *
@@ -173,11 +218,23 @@ final class KeyUseRebuilderTest extends TestCase
      */
     private function storeEntry(array $properties): string
     {
-        $record = $this->finaliser()->finalise(RecordFactory::captured($properties));
+        return $this->storeRecord(RecordFactory::captured($properties));
+    }
 
-        $this->entries()->insert((new RowCodec)->encode($record));
+    /**
+     * Sign the record as the store signs it, insert it as the store inserts it
+     * without its key uses, and return its id.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\AuditRecord  $record
+     * @return string
+     */
+    private function storeRecord(AuditRecord $record): string
+    {
+        $finalised = $this->finaliser()->finalise($record);
 
-        return $record->record->id;
+        $this->entries()->insert((new RowCodec)->encode($finalised));
+
+        return $finalised->record->id;
     }
 
     /**

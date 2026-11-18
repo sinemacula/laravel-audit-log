@@ -556,6 +556,59 @@ final class RewrapperTest extends TestCase
     }
 
     /**
+     * A batch that fails keeps the batches committed before it, and a rerun
+     * rewraps only the keys left.
+     *
+     * @return void
+     *
+     * @throws \Random\RandomException
+     * @throws \Throwable
+     */
+    public function testAFailedLaterBatchKeepsTheCommittedOnesAndARerunRewrapsTheRest(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.privacy.rewrap_batch', 100);
+
+        $ids = $this->storeKeys(200);
+
+        sort($ids, SORT_STRING);
+
+        $this->ring(true);
+
+        $before = $this->storedSubjectKeys();
+
+        [$committed, $left] = array_chunk($ids, 100);
+
+        app()->instance(KeyWrapper::class, $this->wrapperThatChanges($left[50], (string) $before[$committed[0]]->wrappedKey, 100));
+
+        try {
+            $this->rewrap();
+
+            self::fail('Expected the second batch to be rolled back.');
+        } catch (\UnexpectedValueException $exception) {
+            self::assertSame('A subject key changed while its batch was rewrapped; the batch is rolled back.', $exception->getMessage());
+        }
+
+        $after   = $this->storedSubjectKeys();
+        $written = $this->journalRows();
+
+        self::assertSame(['k2'], array_values(array_unique(array_map(static fn (string $id): ?string => $after[$id]->wrapKeyId, $committed))));
+        self::assertEquals(array_intersect_key($before, array_flip($left)), array_intersect_key($after, array_flip($left)));
+        self::assertCount(1, $written);
+
+        app()->instance(KeyWrapper::class, app(LocalKeyWrapper::class));
+
+        $result = $this->rewrap();
+        $rows   = $this->journalRows();
+        $keys   = JournalRow::fromRow($rows[1], true)->payloadMap()['keys'] ?? [];
+
+        self::assertIsArray($keys);
+        self::assertSame([100, 1], [$result->rewrapped, $result->batches]);
+        self::assertSame($left, array_column($keys, 'key_id'));
+        self::assertCount(2, $rows);
+        self::assertSame(['k2'], array_values(array_unique(array_map(static fn (SubjectKeyRow $key): ?string => $key->wrapKeyId, $this->storedSubjectKeys()))));
+    }
+
+    /**
      * A dry run takes no lock and writes nothing, but counts what a run would
      * do.
      *
@@ -823,16 +876,25 @@ final class RewrapperTest extends TestCase
 
     /**
      * The package's key wrapper, which changes the key's stored wrapped key on
-     * its first wrap.
+     * each wrap after the first `$wraps`.
      *
      * @param  string  $keyId
      * @param  string  $wrapped
+     * @param  int  $wraps
      * @return \SineMacula\Laravel\AuditLog\Contracts\KeyWrapper
      */
-    private function wrapperThatChanges(string $keyId, string $wrapped): KeyWrapper
+    private function wrapperThatChanges(string $keyId, string $wrapped, int $wraps = 0): KeyWrapper
     {
-        $inner  = app(LocalKeyWrapper::class);
-        $change = fn () => $this->keyConnection()->table(KeyTables::subjectKeysTable())->where('id', $keyId)->update(['wrapped_key' => $wrapped]);
+        $inner = app(LocalKeyWrapper::class);
+
+        /** @var \ArrayObject<int, true> $seen */
+        $seen = new \ArrayObject;
+
+        $change = function () use ($keyId, $wrapped, $wraps, $seen): int {
+            $seen->append(true);
+
+            return $seen->count() > $wraps ? $this->keyConnection()->table(KeyTables::subjectKeysTable())->where('id', $keyId)->update(['wrapped_key' => $wrapped]) : 0;
+        };
 
         return new readonly class ($inner, $change) implements KeyWrapper {
             /**
