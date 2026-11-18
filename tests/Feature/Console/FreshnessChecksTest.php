@@ -9,20 +9,29 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
 use Illuminate\Support\Facades\DB;
+use Orchestra\Testbench\Attributes\DefineEnvironment;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Console\CheckCommand;
 use SineMacula\Laravel\AuditLog\Console\FreshnessChecks;
 use SineMacula\Laravel\AuditLog\Console\IntegritySchedule;
+use SineMacula\Laravel\AuditLog\Console\PruneCommand;
+use SineMacula\Laravel\AuditLog\Console\SealCommand;
+use SineMacula\Laravel\AuditLog\Console\VerifyCommand;
 use SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor;
 use SineMacula\Laravel\AuditLog\Contracts\Clock;
 use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
+use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
+use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\IntegrityProgress;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
+use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
+use Tests\Concerns\SealsEntries;
 use Tests\Fixtures\Integrity\RecordingAnchor;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\Fixtures\Support\FrozenClock;
@@ -40,6 +49,8 @@ use Tests\TestCase;
 #[CoversClass(CheckCommand::class)]
 final class FreshnessChecksTest extends TestCase
 {
+    use SealsEntries;
+
     /** @var string The time every check is judged at, in UTC. */
     private const string NOW = '2026-11-04 12:00:00.000000';
 
@@ -51,6 +62,9 @@ final class FreshnessChecksTest extends TestCase
 
     /** @var int The default outbox limit, in seconds: 15 minutes. */
     private const int OUTBOX_LIMIT = 900;
+
+    /** @var string A connection of its own for the outbox or the storage tables. */
+    private const string OWN = 'audit_own';
 
     /** @var string What a malformed schedule must be, after its key. */
     private const string CRON = 'must be a cron expression, or null or empty to schedule nothing.';
@@ -66,7 +80,7 @@ final class FreshnessChecksTest extends TestCase
     ];
 
     /**
-     * Register the command, freeze the clock, and bind the default policy.
+     * Register the commands, freeze the clock, and bind the default policy.
      *
      * @return void
      */
@@ -80,6 +94,9 @@ final class FreshnessChecksTest extends TestCase
         assert($kernel instanceof ConsoleKernel);
 
         $kernel->registerCommand(new CheckCommand);
+        $kernel->registerCommand(new SealCommand);
+        $kernel->registerCommand(new VerifyCommand);
+        $kernel->registerCommand(new PruneCommand);
 
         app()->instance(Clock::class, FrozenClock::at(self::NOW));
 
@@ -223,8 +240,13 @@ final class FreshnessChecksTest extends TestCase
     public function testAnAnchorFailureNewerThanTheLastAnchoringFails(): void
     {
         $this->app?->instance(CheckpointAnchor::class, new RecordingAnchor);
+        $this->recordIntegrityRuns(60);
+        $this->entryRecorded(self::DAILY_LIMIT + 1);
 
-        self::assertContains('[freshness] anchoring: never_run', $this->freshness()[1]);
+        [$code, $output] = $this->freshness();
+
+        self::assertSame(0, $code);
+        self::assertContains('[freshness] anchoring: never_run', $output);
 
         $this->record(IntegrityProgress::ANCHOR_LAST_FAILURE, 600, ['sequence' => 3, 'class' => \RuntimeException::class]);
 
@@ -304,6 +326,28 @@ final class FreshnessChecksTest extends TestCase
 
         self::assertSame(1, $code);
         self::assertSame(self::FRESH_INSTALL, $output);
+    }
+
+    /**
+     * A prune that never ran is a problem once the log is old, unless it is
+     * not scheduled.
+     *
+     * @return void
+     */
+    public function testANeverRunPruneIsAProblemOnceTheLogIsOld(): void
+    {
+        $this->config()->set('audit-log.retention.after_days', 30);
+        $this->recordIntegrityRuns(60);
+        $this->entryRecorded(self::DAILY_LIMIT + 1);
+
+        [$code, $output] = $this->freshness();
+
+        self::assertSame(1, $code);
+        self::assertContains('[freshness] retention: never_run (limit 93600s)', $output);
+
+        $this->config()->set('audit-log.retention.schedule', null);
+
+        self::assertSame(0, $this->freshness()[0]);
     }
 
     /**
@@ -515,6 +559,135 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
+     * What the scheduled runs record reads back as every signal ok.
+     *
+     * @return void
+     */
+    public function testTheScheduledRunsLeaveEverySignalOk(): void
+    {
+        $this->everythingApplies();
+        $this->storeEntries(2, self::stored(3600));
+
+        self::assertSame(0, $this->runAt('audit-log:seal', 600));
+        self::assertSame(0, $this->runAt('audit-log:seal', 480, ['--sweep' => true]));
+        self::assertSame(0, $this->runAt('audit-log:prune', 360));
+        self::assertSame(0, $this->runAt('audit-log:verify', 240, ['--strict' => true, '--sweep-first' => true]));
+
+        self::assertSame([0, [
+            '[freshness] sealing: ok (age 240s, limit 1800s)',
+            '[freshness] sweep: ok (age 240s, limit 93600s)',
+            '[freshness] verification: ok (age 240s, limit 93600s)',
+            '[freshness] retention: ok (age 360s, limit 93600s)',
+            '[freshness] anchoring: ok (age 600s)',
+            '[freshness] outbox: ok (age 360s, limit 900s)',
+        ]], $this->freshness());
+    }
+
+    /**
+     * A verification that finds the log tampered with fails its signal.
+     *
+     * @return void
+     */
+    public function testATamperedVerificationFails(): void
+    {
+        app()->instance(ExceptionHandler::class, new RecordingExceptionHandler);
+
+        $ids = $this->storeEntries(2, self::stored(3600));
+
+        self::assertSame(0, $this->runAt('audit-log:seal', 120));
+
+        DB::connection(StorageConnection::name())->table(EntrySettings::table())->where('id', $ids[0])->update(['hmac' => str_repeat('z', 64)]);
+
+        self::assertSame(1, $this->runAt('audit-log:verify', 60, ['--strict' => true, '--sweep-first' => true]));
+
+        [$code, $output] = $this->freshness();
+
+        self::assertSame(1, $code);
+        self::assertContains('[freshness] verification: failed (age 60s, limit 93600s)', $output);
+    }
+
+    /**
+     * An anchor that became unavailable after anchoring fails its signal.
+     *
+     * @return void
+     */
+    public function testAnUnavailableAnchorFails(): void
+    {
+        $anchor = new RecordingAnchor;
+
+        $this->app?->instance(CheckpointAnchor::class, $anchor);
+        $this->storeEntries(1, self::stored(3600));
+
+        self::assertSame(0, $this->runAt('audit-log:seal', 600));
+
+        $this->storeEntries(1, self::stored(300));
+        $anchor->failing();
+
+        self::assertSame(0, $this->runAt('audit-log:seal', 60));
+
+        [$code, $output] = $this->freshness();
+
+        self::assertSame(1, $code);
+        self::assertContains('[freshness] anchoring: failed (age 600s)', $output);
+    }
+
+    /**
+     * The outbox is read on its own connection.
+     *
+     * @return void
+     */
+    #[DefineEnvironment('useOwnOutboxConnection')]
+    public function testTheOutboxIsReadOnItsOwnConnection(): void
+    {
+        $this->config()->set('audit-log.delivery.mode', 'outbox');
+        $this->dueInTheOutbox('0195f4a2-7b1c-7000-8000-000000000001', self::OUTBOX_LIMIT + 1);
+
+        [$code, $output] = $this->freshness();
+
+        self::assertSame(1, $code);
+        self::assertContains('[freshness] outbox: stale (age 901s, limit 900s)', $output);
+    }
+
+    /**
+     * The oldest entry is read on the storage connection.
+     *
+     * @return void
+     */
+    #[DefineEnvironment('useOwnStorageConnection')]
+    public function testTheOldestEntryIsReadOnTheStorageConnection(): void
+    {
+        $this->entryRecorded(self::SEAL_LIMIT + 1);
+
+        self::assertSame([1, self::FRESH_INSTALL], $this->freshness());
+    }
+
+    /**
+     * Put the outbox on a connection of its own.
+     *
+     * @param  \Illuminate\Foundation\Application  $app
+     * @return void
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     */
+    protected function useOwnOutboxConnection(Application $app): void
+    {
+        $this->useOwnConnection($app, 'audit-log.delivery.outbox.connection');
+    }
+
+    /**
+     * Put the storage tables on a connection of their own.
+     *
+     * @param  \Illuminate\Foundation\Application  $app
+     * @return void
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     */
+    protected function useOwnStorageConnection(Application $app): void
+    {
+        $this->useOwnConnection($app, 'audit-log.storage.connection');
+    }
+
+    /**
      * Make every optional signal apply.
      *
      * @return void
@@ -534,11 +707,23 @@ final class FreshnessChecksTest extends TestCase
      */
     private function recordEveryRun(int $ago): void
     {
+        $this->recordIntegrityRuns($ago);
+        $this->record(IntegrityProgress::RETENTION_LAST_RUN, $ago, ['run_id' => 'run', 'status' => 'complete', 'deleted' => 0, 'cursor' => null]);
+        $this->record(IntegrityProgress::ANCHOR_LAST, $ago, ['sequence' => 1, 'anchor' => 'recording'], 'anchored_at');
+    }
+
+    /**
+     * Record passing sealing, sweep and verification runs, the seconds given
+     * ago.
+     *
+     * @param  int  $ago
+     * @return void
+     */
+    private function recordIntegrityRuns(int $ago): void
+    {
         $this->record(IntegrityProgress::SEAL_LAST_RUN, $ago, ['seals' => 1, 'entries' => 1, 'sweep' => false]);
         $this->record(IntegrityProgress::SWEEP_COMPLETED, $ago);
         $this->record(IntegrityProgress::VERIFY_LAST_FULL, $ago, ['head' => 1, 'passed' => true, 'strict' => true]);
-        $this->record(IntegrityProgress::RETENTION_LAST_RUN, $ago, ['run_id' => 'run', 'status' => 'complete', 'deleted' => 0, 'cursor' => null]);
-        $this->record(IntegrityProgress::ANCHOR_LAST, $ago, ['sequence' => 1, 'anchor' => 'recording'], 'anchored_at');
     }
 
     /**
@@ -568,7 +753,7 @@ final class FreshnessChecksTest extends TestCase
      */
     private function dueInTheOutbox(string $id, int $dueAgo, ?int $failedAgo = null, ?int $queuedAgo = null): void
     {
-        DB::table('audit_log_outbox')->insert([
+        DB::connection(DeliveryTables::outboxConnection())->table(DeliveryTables::outboxTable())->insert([
             'id'           => $id,
             'payload'      => 'payload',
             'attempts'     => 0,
@@ -586,9 +771,10 @@ final class FreshnessChecksTest extends TestCase
      */
     private function entryRecorded(int $ago): void
     {
-        DB::table('audit_log_entries')->delete();
+        $entries = DB::connection(StorageConnection::name())->table(EntrySettings::table());
 
-        DB::table('audit_log_entries')->insert([
+        $entries->delete();
+        $entries->insert([
             'id'                => '0195f4a2-7b1c-7000-8000-000000000001',
             'record_version'    => 1,
             'event'             => 'invoice.approved',
@@ -603,6 +789,43 @@ final class FreshnessChecksTest extends TestCase
             'key_id'            => 'test-key',
             'hmac'              => str_repeat('a', 64),
         ]);
+    }
+
+    /**
+     * Point the setting at a connection of its own to the worker's database.
+     *
+     * @param  \Illuminate\Foundation\Application  $app
+     * @param  string  $setting
+     * @return void
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
+     */
+    private function useOwnConnection(Application $app, string $setting): void
+    {
+        $config = $app->make(ConfigRepository::class);
+
+        $config->set('database.connections.' . self::OWN, [...$config->array('database.connections.' . self::CONNECTION), 'prefix' => 'own_']);
+        $config->set($setting, self::OWN);
+    }
+
+    /**
+     * Run the command on a clock the seconds given before now and return its
+     * exit code.
+     *
+     * @param  string  $command
+     * @param  int  $ago
+     * @param  array<string, bool>  $options
+     * @return int
+     */
+    private function runAt(string $command, int $ago, array $options = []): int
+    {
+        app()->instance(Clock::class, FrozenClock::at(self::stored($ago)));
+
+        $code = $this->kernel()->call($command, $options);
+
+        app()->instance(Clock::class, FrozenClock::at(self::NOW));
+
+        return $code;
     }
 
     /**
