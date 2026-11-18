@@ -827,8 +827,8 @@ final class KeyStoreVerifierTest extends TestCase
     }
 
     /**
-     * An erasure past the first page of the journal is folded: the key put
-     * back after it is `key_restored`.
+     * An erasure past the first page of the journal is folded: the key put back
+     * after it is `key_restored`.
      *
      * @return void
      */

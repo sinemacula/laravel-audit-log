@@ -380,8 +380,9 @@ final class KeyStoreTamperingTest extends TestCase
     {
         $before = ['state' => KeyState::LIVE->value, 'wrapped_digest' => $key->wrappedDigest(), 'wrap_key_id' => $key->wrapKeyId];
         $after  = [...$before, 'state' => KeyState::SUPERSEDED->value];
+        $listed = [['key_id' => $key->id, 'before' => $before, 'after' => $after]];
 
-        return $this->journalRow(JournalKind::REWRAP, ['run_id' => (string) Str::uuid7(), 'rotate' => true, 'keys' => [['key_id' => $key->id, 'before' => $before, 'after' => $after]], 'skipped' => []]);
+        return $this->journalRow(JournalKind::REWRAP, ['run_id' => (string) Str::uuid7(), 'rotate' => true, 'keys' => $listed, 'skipped' => []]);
     }
 
     /**
