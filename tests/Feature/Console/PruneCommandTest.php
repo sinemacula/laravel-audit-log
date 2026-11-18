@@ -213,31 +213,25 @@ final class PruneCommandTest extends TestCase
      */
     public function testTheTimeBudgetOptionOverridesTheConfiguredOne(): void
     {
-        $this->storeOld(1);
-        $this->sealAll();
-        $this->storeOld(1);
-        $this->sealAll();
+        for ($seal = 1; $seal <= 3; $seal++) {
+            $this->storeOld(1);
+            $this->sealAll();
+        }
 
-        $moved = false;
-
-        DB::listen(static function (QueryExecuted $query) use (&$moved): void {
-            if ($moved || !str_starts_with($query->sql, 'insert') || !in_array(JournalKind::PRUNE->value, $query->bindings, true)) {
-                return;
+        DB::listen(static function (QueryExecuted $query): void {
+            if (str_starts_with($query->sql, 'insert') && in_array(JournalKind::PRUNE->value, $query->bindings, true)) {
+                CarbonImmutable::setTestNow(CarbonImmutable::now()->addSeconds(61));
             }
-
-            $moved = true;
-
-            CarbonImmutable::setTestNow(new CarbonImmutable('2026-12-15 15:01:01', 'UTC'));
         });
 
         self::assertSame(0, $this->prune(['--max-seconds' => '60']));
         self::assertStringContainsString(': partial.', $this->printed);
         self::assertStringContainsString('Deleted 1 entries from 1 seals.', $this->printed);
-        self::assertSame(1, $this->entries());
+        self::assertSame(2, $this->entries());
 
         self::assertSame(0, $this->prune());
         self::assertStringContainsString(': complete.', $this->printed);
-        self::assertSame(0, $this->entries());
+        self::assertStringContainsString('Deleted 2 entries from 2 seals.', $this->printed);
     }
 
     /**
