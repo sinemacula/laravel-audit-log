@@ -164,6 +164,7 @@ final class LeastPrivilegeOutboxTest extends TestCase
 
         self::assertSame(1, Artisan::call('audit-log:drain'), Artisan::output());
         self::assertNotNull($this->root()->table(DeliveryTables::outboxTable())->where('id', $id)->value('failed_at'));
+        self::assertSame(\DomainException::class, $this->root()->table(DeliveryTables::deliveriesTable())->where('entry_id', $id)->value('last_error_class'));
 
         $this->storeIsDown = false;
 
