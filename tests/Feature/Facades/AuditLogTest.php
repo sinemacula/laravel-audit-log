@@ -4,18 +4,24 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Facades;
 
+use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Encryption\StringEncrypter;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
+use SineMacula\Laravel\AuditLog\Events\AuditRecorded;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle;
 use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
 use SineMacula\Laravel\AuditLog\Recorder;
 use SineMacula\Laravel\AuditLog\Records\Manifest;
 use SineMacula\Laravel\AuditLog\Records\Reference;
+use SineMacula\Laravel\AuditLog\Testing\Concerns\InteractsWithAuditLog;
 use SineMacula\Laravel\AuditLog\Testing\FakeAuditStore;
+use Tests\Concerns\InteractsWithOutbox;
 use Tests\TestCase;
 use Tests\Unit\Stubs\StubAuthUser;
 
@@ -31,6 +37,8 @@ use Tests\Unit\Stubs\StubAuthUser;
 #[CoversClass(AuditLog::class)]
 final class AuditLogTest extends TestCase
 {
+    use InteractsWithAuditLog, InteractsWithOutbox;
+
     /** @var string The code each test records. */
     private const string CODE = 'invoice.approved';
 
@@ -205,6 +213,32 @@ final class AuditLogTest extends TestCase
         DB::connection(self::CONNECTION)->rollBack();
 
         self::assertSame(0, $fake->count());
+    }
+
+    /**
+     * In outbox mode a record reaches the fake, and `AuditRecorded` is
+     * dispatched, only when the outbox is drained.
+     *
+     * @return void
+     */
+    public function testInOutboxModeARecordReachesTheFakeOnlyWhenDrained(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.delivery.mode', 'outbox');
+
+        Event::fake([AuditRecorded::class]);
+
+        AuditLog::fake();
+        AuditLog::record(self::CODE);
+
+        $this->assertNothingAudited();
+        self::assertSame(1, $this->outboxCount());
+        Event::assertNotDispatched(AuditRecorded::class);
+
+        self::assertSame(0, Artisan::call('audit-log:drain'));
+
+        $this->assertAuditedTimes(self::CODE, 1);
+        self::assertSame(0, $this->outboxCount());
+        Event::assertDispatchedTimes(AuditRecorded::class, 1);
     }
 
     /**

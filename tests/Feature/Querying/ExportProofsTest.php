@@ -4,10 +4,15 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Querying;
 
+use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Contracts\Auth\Authenticatable;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Access\AccessScope;
 use SineMacula\Laravel\AuditLog\Access\DenyAllPolicy;
+use SineMacula\Laravel\AuditLog\Access\Enums\ReadPurpose;
 use SineMacula\Laravel\AuditLog\Contracts\AuditAccessPolicy;
+use SineMacula\Laravel\AuditLog\Delivery\Enums\DeliveryMode;
+use SineMacula\Laravel\AuditLog\Delivery\OutboxDrainer;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Integrity\KeyRing;
 use SineMacula\Laravel\AuditLog\Querying\AuditTrail;
@@ -230,6 +235,82 @@ final class ExportProofsTest extends TestCase
         $this->allowTenants(Reference::of('organisation', 'org_02'));
 
         self::assertSame([ExportFinding::ENTRY_MISSING], $this->trail()->verifyExport($this->target())->findings);
+    }
+
+    /**
+     * An export journalled with no tenant verifies only under a scope that sees
+     * tenantless `audit` entries.
+     *
+     * @return void
+     */
+    public function testATenantlessJournalVerifiesOnlyWhereTenantlessAuditEntriesAreSeen(): void
+    {
+        $tenant = Reference::of('organisation', self::TENANT);
+
+        $this->usePolicy(static fn (): AccessScope => AccessScope::tenants($tenant)->withTenantless());
+        $this->seedEntries(2);
+
+        $result  = $this->trail()->export($this->target());
+        $journal = $this->storedRow($result->entryId);
+
+        self::assertSame([null, null], [$journal['tenant_type'], $journal['tenant_id']]);
+        self::assertTrue($this->trail()->verifyExport($this->target())->isVerified());
+
+        $this->allowTenants($tenant);
+
+        self::assertSame([ExportFinding::ENTRY_MISSING], $this->trail()->verifyExport($this->target())->findings);
+
+        $this->usePolicy(static fn (): AccessScope => AccessScope::all()->exceptCategories('audit'));
+
+        self::assertSame([ExportFinding::ENTRY_MISSING], $this->trail()->verifyExport($this->target())->findings);
+    }
+
+    /**
+     * An outbox-mode export is unverifiable until a drain stores its journal.
+     *
+     * @return void
+     */
+    public function testAnOutboxModeExportVerifiesOnceDrained(): void
+    {
+        $this->allowEverything();
+        $this->seedEntries(3);
+
+        app(ConfigRepository::class)->set('audit-log.delivery.mode', DeliveryMode::OUTBOX->value);
+
+        $this->trail()->export($this->target());
+
+        self::assertSame([ExportFinding::ENTRY_MISSING], $this->trail()->verifyExport($this->target())->findings);
+        self::assertSame(2, app(OutboxDrainer::class)->drain(100, false)->delivered());
+
+        $verification = $this->trail()->verifyExport($this->target());
+
+        self::assertTrue($verification->isVerified());
+        self::assertSame([], $verification->findings);
+    }
+
+    /**
+     * A policy that narrows exports lets a viewer page entries an export leaves
+     * out, and the narrowed export still verifies.
+     *
+     * @return void
+     */
+    public function testAPolicyThatNarrowsExportsStillVerifies(): void
+    {
+        $scope = AccessScope::tenants(Reference::of('organisation', self::TENANT));
+
+        $this->usePolicy(
+            static fn (Authenticatable|Reference $viewer, ReadPurpose $purpose): AccessScope => $purpose === ReadPurpose::EXPORT ? $scope->exceptCategories('security') : $scope,
+        );
+
+        $finance  = $this->seedEntry([], '2026-11-01T12:00:00.000001Z');
+        $security = $this->seedEntry(['category' => 'security'], '2026-11-01T12:00:00.000002Z');
+
+        $trail = $this->trail()->inCategory('finance', 'security');
+
+        self::assertSame([$security, $finance], self::idsOf($trail->cursorPaginate()));
+        self::assertSame(1, $trail->export($this->target())->lines);
+        self::assertSame([$finance], $this->exportedIds());
+        self::assertTrue($this->trail()->verifyExport($this->target())->isVerified());
     }
 
     /**

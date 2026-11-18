@@ -489,8 +489,9 @@ promises is in `threat-model.md`; how a prune is verified is in `integrity.md`.
   `testTheBatchIsNotExternallyVerified`, `testImportedRowsAreNotDispatchedOrDelivered`,
   `testTheHoldIsPlacedBeforeTheFirstEntry`, `testTheStartAndTheHoldCommitTogether`,
   `testAJournalFailureAtStartFailsTheBatchAndWritesNoEntry`, `testOnFailureTheHoldStays`,
-  `testAFileChangedDuringTheImportFailsTheBatch`, `testItRefusesItsOwnSource`, `testAReimportAfterAPruneCreatesNewRows`,
-  `testCloseMarksARunningBatchInterruptedAndJournalsIt`, `testCloseRefusesAFinishedBatch`,
+  `testAFileChangedDuringTheImportFailsTheBatch`, `testItRefusesItsOwnSource`,
+  `testAReimportAfterTheStoredRowsAreGoneCreatesNewRows`, `testCloseMarksARunningBatchInterruptedAndJournalsIt`,
+  `testCloseRefusesAFinishedBatch`,
   `testEntriesAndTheBatchAreOnTheStorageWriterAndTheJournalOnTheMaintenanceConnection`
 - `tests/Feature/Lifecycle/ImportLineParserTest.php` `testEnvelopeShapedValuesAreDroppedAtAnyDepth`,
   `testAnEnvelopeShapedIpIsDropped`, `testTheFutureSkewIsTheSetting`
