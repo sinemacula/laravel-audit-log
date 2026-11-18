@@ -76,7 +76,8 @@ final readonly class Replayer
 
     /**
      * Replay each line of the spill file that holds a record, or, on a dry run,
-     * count what would be replayed and change nothing.
+     * count what would be replayed and change nothing; a non-empty file with no
+     * spill line, such as a compressed one, is refused.
      *
      * @param  string  $path
      * @param  bool  $dryRun
@@ -94,8 +95,15 @@ final readonly class Replayer
             $this->container->make(MaintenanceTransaction::class)->confirm();
         }
 
+        $marked = false;
+
         foreach ($this->reader->lines($path) as $line) {
+            $marked = true;
             $this->replayLine($line, $dryRun, $result);
+        }
+
+        if (!$marked && filesize($path) !== 0) {
+            throw new \InvalidArgumentException(sprintf('The spill file [%s] holds no spill line.', $path));
         }
 
         return $result;
