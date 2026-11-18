@@ -254,7 +254,8 @@ final readonly class KeyCreator
             return;
         }
 
-        // Only PostgreSQL runs this; KeySessionEnginesTest covers it there.
+        // Only PostgreSQL runs this; KeySessionEnginesTest covers it there, the
+        // refusal in testOnPostgresAKeyIsRefusedAtRepeatableRead.
         // @codeCoverageIgnoreStart
         if ($connection->transactionLevel() === 1) {
             $connection->statement('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');

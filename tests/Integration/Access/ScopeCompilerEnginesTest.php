@@ -19,7 +19,8 @@ use Tests\TestCase;
 
 /**
  * Integration tests for the scope compiler's statements run on rows each engine
- * stored: tenants, filters within a scope, microsecond ids and export keysets.
+ * stored: tenants, filters within a scope, time windows, microsecond ids and
+ * export keysets.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -92,6 +93,50 @@ final class ScopeCompilerEnginesTest extends TestCase
 
         self::assertTrue((new ScopeCompiler)->isEmpty($scope, $outside));
         self::assertSame([], self::idsUnder($scope, $outside));
+    }
+
+    /**
+     * A tenant id differing only in case or a trailing space is never in the
+     * scope of the first.
+     *
+     * @return void
+     */
+    public function testATenantIdDifferingOnlyInCaseOrATrailingSpaceIsOutOfScope(): void
+    {
+        self::insert(1, ['tenant_type' => 'organisation', 'tenant_id' => 'org_01']);
+        self::insert(2, ['tenant_type' => 'organisation', 'tenant_id' => 'ORG_01']);
+        self::insert(3, ['tenant_type' => 'organisation', 'tenant_id' => 'org_01 ']);
+
+        $scope = AccessScope::tenants(Reference::of('organisation', 'org_01'));
+
+        self::assertSame([self::id(1)], self::idsUnder($scope, TrailFilters::none()));
+        self::assertSame(1, self::countUnder($scope, TrailFilters::none()));
+    }
+
+    /**
+     * A window holds the rows from its start, inclusive, to its end, exclusive,
+     * to the microsecond.
+     *
+     * @return void
+     */
+    public function testAWindowIncludesItsStartAndExcludesItsEndToTheMicrosecond(): void
+    {
+        $occurred = [
+            1 => '2026-11-01 12:00:00.123455',
+            2 => '2026-11-01 12:00:00.123456',
+            3 => '2026-11-01 12:00:00.123457',
+            4 => '2026-11-01 12:00:01.654320',
+            5 => '2026-11-01 12:00:01.654321',
+        ];
+
+        foreach ($occurred as $index => $at) {
+            self::insert($index, ['occurred_at' => $at]);
+        }
+
+        $window = TrailFilters::none()->withWindow(new \DateTimeImmutable('2026-11-01T12:00:00.123456Z'), new \DateTimeImmutable('2026-11-01T12:00:01.654321Z'));
+
+        self::assertSame([self::id(2), self::id(3), self::id(4)], self::idsUnder(AccessScope::all(), $window));
+        self::assertSame(3, self::countUnder(AccessScope::all(), $window));
     }
 
     /**
@@ -170,6 +215,18 @@ final class ScopeCompilerEnginesTest extends TestCase
         $ids = (new ScopeCompiler)->apply(self::entries(), $scope, $filters)->orderBy('id')->pluck('id')->all();
 
         return self::strings($ids);
+    }
+
+    /**
+     * The number of rows the scope and the filters see.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Access\AccessScope  $scope
+     * @param  \SineMacula\Laravel\AuditLog\Querying\TrailFilters  $filters
+     * @return int
+     */
+    private static function countUnder(AccessScope $scope, TrailFilters $filters): int
+    {
+        return (new ScopeCompiler)->apply(self::entries(), $scope, $filters)->count();
     }
 
     /**
