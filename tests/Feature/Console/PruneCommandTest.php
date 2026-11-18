@@ -8,6 +8,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -17,6 +18,7 @@ use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
+use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
 use SineMacula\Laravel\AuditLog\Lifecycle\JournalPruneLedger;
@@ -204,14 +206,38 @@ final class PruneCommandTest extends TestCase
     }
 
     /**
-     * A time budget within its range is taken.
+     * `--max-seconds` bounds the run in place of `retention.max_seconds`, and
+     * a run without it takes the configured budget.
      *
      * @return void
      */
-    public function testATimeBudgetWithinItsRangeIsTaken(): void
+    public function testTheTimeBudgetOptionOverridesTheConfiguredOne(): void
     {
+        $this->storeOld(1);
+        $this->sealAll();
+        $this->storeOld(1);
+        $this->sealAll();
+
+        $moved = false;
+
+        DB::listen(static function (QueryExecuted $query) use (&$moved): void {
+            if ($moved || !str_starts_with($query->sql, 'insert') || !in_array(JournalKind::PRUNE->value, $query->bindings, true)) {
+                return;
+            }
+
+            $moved = true;
+
+            CarbonImmutable::setTestNow(new CarbonImmutable('2026-12-15 15:01:01', 'UTC'));
+        });
+
         self::assertSame(0, $this->prune(['--max-seconds' => '60']));
-        self::assertSame(0, $this->prune(['--max-seconds' => '86400']));
+        self::assertStringContainsString(': partial.', $this->printed);
+        self::assertStringContainsString('Deleted 1 entries from 1 seals.', $this->printed);
+        self::assertSame(1, $this->entries());
+
+        self::assertSame(0, $this->prune());
+        self::assertStringContainsString(': complete.', $this->printed);
+        self::assertSame(0, $this->entries());
     }
 
     /**
