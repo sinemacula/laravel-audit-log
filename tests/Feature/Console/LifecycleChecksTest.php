@@ -254,7 +254,7 @@ final class LifecycleChecksTest extends TestCase
 
         $gate['armed'] = false;
 
-        self::assertSame(['The lifecycle lock row could not be read (DomainException).'], $problems);
+        self::assertSame(['The lifecycle lock could not be read (DomainException).'], $problems);
     }
 
     /**
@@ -362,6 +362,39 @@ final class LifecycleChecksTest extends TestCase
         }
 
         self::assertSame([], $this->checks()->problems());
+    }
+
+    /**
+     * The lock is read on the maintenance connection, never the storage one.
+     *
+     * @return void
+     */
+    public function testTheLockIsReadOnTheMaintenanceConnectionAlone(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('database.connections.' . self::MAINTENANCE, $config->array('database.connections.' . self::CONNECTION));
+        $config->set('audit-log.storage.maintenance_connection', self::MAINTENANCE);
+
+        if (DB::connection(self::CONNECTION)->getDriverName() === 'sqlite') {
+            DB::connection(self::MAINTENANCE)->setPdo(DB::connection(self::CONNECTION)->getPdo());
+        }
+
+        $armed = new \ArrayObject([self::CONNECTION => true, self::MAINTENANCE => false]);
+
+        foreach ([self::CONNECTION, self::MAINTENANCE] as $name) {
+            DB::connection($name)->beforeExecuting(static function (string $query) use ($armed, $name): void {
+                if ($armed[$name] === true && str_contains($query, 'audit_log_lifecycle_lock')) {
+                    throw new \DomainException('secret-detail');
+                }
+            });
+        }
+
+        self::assertSame([], $this->checks()->problems());
+
+        $armed->exchangeArray([self::CONNECTION => false, self::MAINTENANCE => true]);
+
+        self::assertSame(['The lifecycle lock could not be read (DomainException).'], $this->checks()->problems());
     }
 
     /**

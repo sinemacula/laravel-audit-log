@@ -325,7 +325,8 @@ block, which runs after the others:
   the artifacts and the deliveries, because pruning deletes an entry's artifact and receipts with it and keeps every
   checkpoint and member; `SELECT` on the checkpoints, the members, the integrity state, for the installation id, and the
   outbox when it is on the storage database; `SELECT` and `INSERT` on the journal; `SELECT`, `INSERT` and `DELETE` on
-  the holds; and `SELECT` and `UPDATE` of `token` and `locked_at` alone on the lock.
+  the holds; and `SELECT` and `UPDATE` of `token` and `locked_at` alone on the lock, which `audit-log:check` reads
+  through the maintenance connection once it reaches the storage connection's installation.
 - For the owners' keys, the writer is granted `SELECT` and `INSERT` on the subject keys and the key uses, because it
   creates a key the first time an owner's field is sealed and inserts each key use with its entry, and `SELECT` on the
   owner erasures, because it reads the owner's latest marker before it creates a key; it updates no key. The maintenance
@@ -1046,6 +1047,8 @@ COMMIT;
   `testAFailedAuditInsertLeavesAHealthyHostTransactionUsable`, `testTheStoreCatchesNothingButADuplicate`
 - `tests/Integration/Stores/LeastPrivilegeWriterTest.php`
   `testAWriterGrantedOnlyWhatTheStoreNeedsStoresAndResolvesDuplicates`, `testOnMySqlTheLockingReadNeedsOnlySelect`
+- `tests/Integration/Stores/LeastPrivilegeOutboxTest.php` `testAWriterWithTheOutboxGrantsRecordsDrainsAndReplays`,
+  `testTheMaintenanceUserPrunesAndDefersPendingDeliveries`
 - `tests/Integration/Stores/StoredEntryRoundTripTest.php` `testTimesStayUtcUnderNonUtcSessionAndApplicationTimeZones`,
   `testMicrosecondsSurviveIncludingTrailingZeros`
 - `tests/Performance/StoreQueryBudgetTest.php` `testStoringARecordIsOneInsert`,
@@ -1199,7 +1202,9 @@ COMMIT;
 - `tests/Feature/Console/LifecycleChecksTest.php` `testEachTableShapeProblemIsReported`,
   `testAMissingLockRowIsAProblem`, `testAMismatchedInstallationIsAProblem`, `testProjectionDriftIsAProblemNamingTheHolds`,
   `testTheJournalIsVerifiedWithoutTheLock`, `testAMissingInstallationIdIsAProblemAndIsNeverWritten`,
-  `testTheSeededInstallationIdIsOnlyRead`
+  `testTheSeededInstallationIdIsOnlyRead`, `testTheLockIsReadOnTheMaintenanceConnectionAlone`
+- `tests/Integration/Console/LeastPrivilegeCheckTest.php` `testTheCheckPassesUnderTheDocumentedGrants`,
+  `testTheFreshnessCheckPassesUnderTheDocumentedGrants`
 - `tests/Feature/Database/KeyTablesTest.php` `testTheDefaultsApplyWhenNothingIsSet`,
   `testANullOrEmptySettingIsItsDefault`, `testEachTableIsItsSetting`, `testRefusesANameOutsideTheGrammarNamingTheLeaf`,
   `testValidateNamesTheFirstBadLeaf`
