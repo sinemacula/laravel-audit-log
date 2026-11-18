@@ -260,6 +260,7 @@ final class DocumentationTest extends TestCase
         'eventless gate checks'        => ['Gate denials', '`Gate::allowIf()`, `Gate::denyIf()` and callbacks that throw fire no `GateEvaluated`, so they record nothing'],
         'gate checks recorded by hand' => ['Gate denials', 'Record these explicitly'],
         'a subclass'                   => ['Model changes', 'a subclass is not watched through its parent'],
+        'a keyless pivot model'        => ['Model changes', 'one with `Pivot`\'s defaults has none and fails each capture'],
         'the query builder'            => ['Gaps in model capture', 'query-builder `update`, `delete`, `insert`, `upsert` and `increment`'],
         'a quiet save'                 => ['Gaps in model capture', '`saveQuietly`'],
         'no events'                    => ['Gaps in model capture', '`withoutEvents`'],

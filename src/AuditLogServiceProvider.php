@@ -136,8 +136,8 @@ final class AuditLogServiceProvider extends ServiceProvider
     ];
 
     /**
-     * Whether the contract is still bound by this provider and any instance
-     * held under it is exactly the default's class.
+     * Whether the contract is still bound by this provider, has no extender,
+     * and any instance held under it is exactly the default's class.
      *
      * @param  \Illuminate\Container\Container  $container
      * @param  string  $contract
@@ -151,10 +151,11 @@ final class AuditLogServiceProvider extends ServiceProvider
             return false;
         }
 
-        // Laravel offers no public way to read an instance held over a binding
-        $held = \Closure::bind(static fn (Container $container): ?object => $container->instances[$contract] ?? null, null, Container::class)($container);
+        // Laravel offers no public way to read what is held over a binding
+        $held     = \Closure::bind(static fn (Container $container): ?object => $container->instances[$contract] ?? null, null, Container::class)($container);
+        $extended = \Closure::bind(static fn (Container $container): bool => isset($container->extenders[$contract]), null, Container::class)($container);
 
-        return $held === null || $held::class === (self::SHARED_DEFAULTS[$contract] ?? null);
+        return !$extended && ($held === null || $held::class === (self::SHARED_DEFAULTS[$contract] ?? null));
     }
 
     /**
