@@ -190,18 +190,32 @@ final class ImportBatchesTest extends TestCase
     }
 
     /**
-     * A finished batch takes its final status, counts and time, and is never
-     * written again.
+     * Only a running batch settles, taking its final status, counts and time,
+     * and is never written again.
      *
      * @return void
      */
-    public function testFinishSetsStatusCountsAndTime(): void
+    public function testSettlesOnlyARunningBatch(): void
     {
         $this->batches()->start(self::given());
 
+        try {
+            $this->batches()->settles(self::BATCH, ImportStatus::RUNNING, self::tally());
+            self::fail('Expected a status that is not final to be refused.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertSame('An import batch finishes in a final status.', $exception->getMessage());
+        }
+
+        self::assertSame('running', $this->batches()->find(self::BATCH)['status'] ?? null);
+
         CarbonImmutable::setTestNow(new CarbonImmutable('2026-11-02 09:10:00.000001', 'UTC'));
 
-        $this->batches()->finish(self::BATCH, ImportStatus::PARTIAL, self::tally());
+        self::assertTrue($this->batches()->settles(self::BATCH, ImportStatus::PARTIAL, self::tally()));
+
+        CarbonImmutable::setTestNow(new CarbonImmutable('2026-11-02 09:20:00.000000', 'UTC'));
+
+        self::assertFalse($this->batches()->settles(self::BATCH, ImportStatus::COMPLETE, new ImportTally));
+        self::assertFalse($this->batches()->settles('01932b4e-a000-7000-8000-00000000ffff', ImportStatus::COMPLETE));
 
         $row = $this->batches()->find(self::BATCH);
 
@@ -212,81 +226,31 @@ final class ImportBatchesTest extends TestCase
         self::assertSame('2026-11-02 09:10:00.000001', self::time($row['updated_at']));
         self::assertSame(self::STARTED, self::time($row['started_at']));
 
-        try {
-            $this->batches()->finish(self::BATCH, ImportStatus::COMPLETE, new ImportTally);
-            self::fail('Expected a finished batch to be refused.');
-        } catch (\LogicException $exception) {
-            self::assertSame('The import batch is no longer running, and is not written to.', $exception->getMessage());
-        }
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('The import batch is no longer running, and is not written to.');
 
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('An import batch finishes in a final status.');
-
-        $this->batches()->finish(self::BATCH, ImportStatus::RUNNING, new ImportTally);
+        DB::connection(StorageConnection::name())->transaction(fn (Connection $connection) => $this->batches()->progress($connection, self::BATCH, self::tally()));
     }
 
     /**
-     * Only a running batch is closed, `interrupted`.
+     * A batch settled without a tally keeps the counts its chunks wrote.
      *
      * @return void
      */
-    public function testCloseOnlyClosesARunningBatch(): void
+    public function testSettlesWithoutATallyKeepsTheStoredCounts(): void
     {
         $this->batches()->start(self::given());
 
         DB::connection(StorageConnection::name())->transaction(fn (Connection $connection) => $this->batches()->progress($connection, self::BATCH, self::tally()));
 
-        CarbonImmutable::setTestNow(new CarbonImmutable('2026-11-02 11:00:00.000000', 'UTC'));
-
-        $this->batches()->close(self::BATCH);
+        self::assertTrue($this->batches()->settles(self::BATCH, ImportStatus::INTERRUPTED));
 
         $row = $this->batches()->find(self::BATCH);
 
         self::assertNotNull($row);
         self::assertSame('interrupted', $row['status']);
-        self::assertSame('3', (string) $row['lines_read']);
-        self::assertSame('2026-11-02 11:00:00.000000', self::time($row['finished_at']));
-
-        foreach ([self::BATCH, '01932b4e-a000-7000-8000-00000000ffff'] as $batch) {
-            try {
-                $this->batches()->close($batch);
-                self::fail('Expected the close to be refused.');
-            } catch (\InvalidArgumentException $exception) {
-                self::assertSame('Only a running import batch is closed.', $exception->getMessage());
-            }
-        }
-
-        $connection = DB::connection(StorageConnection::name());
-
-        $this->expectException(\LogicException::class);
-
-        $connection->transaction(fn (Connection $connection) => $this->batches()->progress($connection, self::BATCH, self::tally()));
-    }
-
-    /**
-     * Only running batches not written for more than an hour are stale.
-     *
-     * @return void
-     */
-    public function testStaleListsOnlyOldRunningBatches(): void
-    {
-        $older    = '01932b4e-a000-7000-8000-0000000000c1';
-        $old      = '01932b4e-a000-7000-8000-0000000000c2';
-        $finished = '01932b4e-a000-7000-8000-0000000000c3';
-
-        $this->startAt($old, '2026-11-02 07:00:00.000000');
-        $this->startAt($older, '2026-11-02 06:00:00.000000');
-        $this->startAt($finished, '2026-11-02 05:00:00.000000');
-        $this->batches()->finish($finished, ImportStatus::COMPLETE, new ImportTally);
-        $this->startAt(self::BATCH, '2026-11-02 08:00:00.000000');
-
-        CarbonImmutable::setTestNow(new CarbonImmutable('2026-11-02 09:00:00.000000', 'UTC'));
-
-        self::assertSame([$older, $old], array_column($this->batches()->stale(), 'id'));
-
-        CarbonImmutable::setTestNow(new CarbonImmutable('2026-11-02 09:00:00.000001', 'UTC'));
-
-        self::assertSame([$older, $old, self::BATCH], array_column($this->batches()->stale(), 'id'));
+        self::assertSame([3, 0, 0, 1, 1], array_map(intval(...), [$row['lines_read'], $row['imported'], $row['duplicates'], $row['conflicts'], $row['rejected']]));
+        self::assertSame('["rec-2"]', $row['conflict_ids']);
     }
 
     /**
@@ -304,28 +268,9 @@ final class ImportBatchesTest extends TestCase
         self::assertSame(1, DB::connection(self::PRIMARY_CONNECTION)->table(LifecycleTables::importBatchesTable())->count());
         self::assertSame(0, DB::connection(self::REPLICA_CONNECTION)->table(LifecycleTables::importBatchesTable())->count());
         self::assertSame('running', $this->batches()->find(self::BATCH)['status'] ?? null);
-
-        CarbonImmutable::setTestNow(new CarbonImmutable('2026-11-02 11:00:00.000000', 'UTC'));
-
-        self::assertSame([self::BATCH], array_column($this->batches()->stale(), 'id'));
-
-        $this->batches()->finish(self::BATCH, ImportStatus::COMPLETE, self::tally());
+        self::assertTrue($this->batches()->settles(self::BATCH, ImportStatus::COMPLETE, self::tally()));
 
         self::assertSame('complete', DB::connection(self::PRIMARY_CONNECTION)->table(LifecycleTables::importBatchesTable())->value('status'));
-    }
-
-    /**
-     * Start the batch of the id given at the time given.
-     *
-     * @param  string  $id
-     * @param  string  $at
-     * @return void
-     */
-    private function startAt(string $id, string $at): void
-    {
-        CarbonImmutable::setTestNow(new CarbonImmutable($at, 'UTC'));
-
-        $this->batches()->start([...self::given(), 'id' => $id]);
     }
 
     /**

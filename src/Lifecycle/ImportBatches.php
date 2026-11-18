@@ -116,28 +116,9 @@ final readonly class ImportBatches
     {
         self::checkInTransaction($connection);
 
-        self::checkUpdated($this->running($connection, $id)->update([...$tally->toBatch(), 'updated_at' => $this->now()]), false);
-    }
-
-    /**
-     * Move the running batch to its final status; a batch no longer running is
-     * refused.
-     *
-     * @param  string  $id
-     * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportStatus  $status
-     * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportTally  $tally
-     * @return void
-     *
-     * @throws \InvalidArgumentException
-     * @throws \LogicException
-     * @throws \UnexpectedValueException
-     */
-    public function finish(string $id, ImportStatus $status, ImportTally $tally): void
-    {
-        $now    = $this->now();
-        $values = [...$tally->toBatch(), 'status' => self::finalOf($status)->value, 'updated_at' => $now, 'finished_at' => $now];
-
-        self::checkUpdated($this->running($this->connection(), $id)->update($values), false);
+        if ($this->running($connection, $id)->update([...$tally->toBatch(), 'updated_at' => $this->now()]) !== 1) {
+            throw new \LogicException('The import batch is no longer running, and is not written to.');
+        }
     }
 
     /**
@@ -155,25 +136,10 @@ final readonly class ImportBatches
     public function settles(string $id, ImportStatus $status, ?ImportTally $tally = null): bool
     {
         $now    = $this->now();
-        $values = [...($tally?->toBatch() ?? []), 'status' => self::finalOf($status)->value, 'updated_at' => $now, 'finished_at' => $now];
+        $final  = $status->isFinal() ? $status : throw new \InvalidArgumentException('An import batch finishes in a final status.');
+        $values = [...($tally?->toBatch() ?? []), 'status' => $final->value, 'updated_at' => $now, 'finished_at' => $now];
 
         return $this->running($this->connection(), $id)->update($values) === 1;
-    }
-
-    /**
-     * Mark the running batch `interrupted`; any other batch is refused.
-     *
-     * @param  string  $id
-     * @return void
-     *
-     * @throws \InvalidArgumentException
-     * @throws \LogicException
-     */
-    public function close(string $id): void
-    {
-        $now = $this->now();
-
-        self::checkUpdated($this->running($this->connection(), $id)->update(['status' => ImportStatus::INTERRUPTED->value, 'updated_at' => $now, 'finished_at' => $now]), true);
     }
 
     /**
@@ -192,28 +158,6 @@ final readonly class ImportBatches
 
         /** @var array<string, scalar|null> */
         return (array) $row;
-    }
-
-    /**
-     * Every running batch not written within `STALE_SECONDS`, oldest first.
-     *
-     * @return list<array<string, scalar|null>>
-     */
-    public function stale(): array
-    {
-        $before = StoredTime::toStorage(StoredTime::format($this->clock->now()->subSeconds(ImportSettings::STALE_SECONDS)));
-
-        $rows = $this->table($this->connection())
-            ->useWritePdo()
-            ->where('status', ImportStatus::RUNNING->value)
-            ->where('updated_at', '<', $before)
-            ->orderBy('updated_at')
-            ->orderBy('id')
-            ->get()
-            ->all();
-
-        /** @var list<array<string, scalar|null>> */
-        return array_values(array_map(static fn (#[\SensitiveParameter] object $row): array => (array) $row, $rows));
     }
 
     /**
@@ -264,43 +208,6 @@ final readonly class ImportBatches
         }
 
         throw new \LogicException('An import batch is written by a chunk only inside the chunk\'s own transaction.');
-    }
-
-    /**
-     * The status, refused unless it is final.
-     *
-     * @param  \SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportStatus  $status
-     * @return \SineMacula\Laravel\AuditLog\Lifecycle\Enums\ImportStatus
-     *
-     * @throws \InvalidArgumentException
-     */
-    private static function finalOf(ImportStatus $status): ImportStatus
-    {
-        return $status->isFinal() ? $status : throw new \InvalidArgumentException('An import batch finishes in a final status.');
-    }
-
-    /**
-     * Refuse an update that changed no row: a close as the caller's error,
-     * anything else as the import's.
-     *
-     * @param  int  $updated
-     * @param  bool  $closing
-     * @return void
-     *
-     * @throws \InvalidArgumentException
-     * @throws \LogicException
-     */
-    private static function checkUpdated(int $updated, bool $closing): void
-    {
-        if ($updated === 1) {
-            return;
-        }
-
-        if ($closing) {
-            throw new \InvalidArgumentException('Only a running import batch is closed.');
-        }
-
-        throw new \LogicException('The import batch is no longer running, and is not written to.');
     }
 
     /**
