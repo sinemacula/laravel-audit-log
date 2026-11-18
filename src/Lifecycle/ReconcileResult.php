@@ -38,7 +38,7 @@ final readonly class ReconcileResult implements Arrayable
         /** The operations whose missing record was written again. */
         public int $recorded = 0,
 
-        /** The operations an entry already records. */
+        /** The operations an entry already records, or recorded before retention pruned it. */
         public int $alreadyRecorded = 0,
 
         /** The operations whose journal rows do not verify, which are never recorded. */
