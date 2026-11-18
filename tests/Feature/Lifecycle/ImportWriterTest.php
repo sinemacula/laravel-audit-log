@@ -269,22 +269,46 @@ final class ImportWriterTest extends TestCase
      */
     public function testRowsPerInsertFollowTheEngine(): void
     {
-        $inserts = [];
-
-        DB::listen(static function (QueryExecuted $query) use (&$inserts): void {
-            if (!str_starts_with(strtolower($query->sql), 'insert') || !str_contains($query->sql, EntrySettings::table())) {
-                return;
-            }
-
-            $inserts[] = intdiv(count($query->bindings), count(RowCodec::COLUMNS));
-        });
+        $inserts = $this->inserts();
 
         $this->writer()->write(self::BATCH, self::lines(100), self::read(100), CarbonImmutable::now());
 
         $expected = $this->connection()->getDriverName() === 'sqlite' ? [24, 24, 24, 24, 4] : [100];
 
-        self::assertSame($expected, $inserts);
+        self::assertSame($expected, array_column($inserts->getArrayCopy(), 0));
         self::assertSame(100, $this->entries());
+    }
+
+    /**
+     * Rows are grouped so that no insert sends more than the bytes per insert.
+     *
+     * @return void
+     */
+    public function testInsertsAreBoundedByBytes(): void
+    {
+        $length  = self::bytesOf($this->rowOf(self::line(1, 'rec-1')));
+        $inserts = $this->inserts();
+
+        $this->writer(2 * $length)->write(self::BATCH, self::lines(4), self::read(4), CarbonImmutable::now());
+
+        self::assertSame([[2, 2 * $length], [2, 2 * $length]], $inserts->getArrayCopy());
+        self::assertSame(4, $this->entries());
+    }
+
+    /**
+     * A row larger than the bytes per insert is inserted alone.
+     *
+     * @return void
+     */
+    public function testARowOverTheBytesPerInsertGoesAlone(): void
+    {
+        $length  = self::bytesOf($this->rowOf(self::line(1, 'rec-1')));
+        $inserts = $this->inserts();
+
+        $this->writer($length - 1)->write(self::BATCH, self::lines(3), self::read(3), CarbonImmutable::now());
+
+        self::assertSame([[1, $length], [1, $length], [1, $length]], $inserts->getArrayCopy());
+        self::assertSame(3, $this->entries());
     }
 
     /**
@@ -712,6 +736,40 @@ final class ImportWriterTest extends TestCase
     }
 
     /**
+     * Log each insert of entries as its rows and bytes of values.
+     *
+     * @return \ArrayObject<int, array{0: int, 1: int}>
+     */
+    private function inserts(): \ArrayObject
+    {
+        /** @var \ArrayObject<int, array{0: int, 1: int}> $inserts */
+        $inserts = new \ArrayObject;
+
+        DB::listen(static function (QueryExecuted $query) use ($inserts): void {
+            if (!str_starts_with(strtolower($query->sql), 'insert') || !str_contains($query->sql, EntrySettings::table())) {
+                return;
+            }
+
+            $inserts->append([intdiv(count($query->bindings), count(RowCodec::COLUMNS)), self::bytesOf($query->bindings)]);
+        });
+
+        return $inserts;
+    }
+
+    /**
+     * The bytes of the values, as an insert counts them.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<array-key, mixed>  $values
+     * @return int
+     */
+    private static function bytesOf(array $values): int
+    {
+        return array_sum(array_map(static fn (mixed $value): int => is_scalar($value) ? strlen((string) $value) : 0, $values));
+    }
+
+    /**
      * Log the chunk's transaction events and statements by what each is.
      *
      * @return \ArrayObject<int, string>
@@ -919,11 +977,12 @@ final class ImportWriterTest extends TestCase
     /**
      * The writer the container builds.
      *
+     * @param  int  $bytesPerInsert
      * @return \SineMacula\Laravel\AuditLog\Lifecycle\ImportWriter
      */
-    private function writer(): ImportWriter
+    private function writer(int $bytesPerInsert = ImportWriter::BYTES_PER_INSERT): ImportWriter
     {
-        return app(ImportWriter::class);
+        return app()->make(ImportWriter::class, ['bytesPerInsert' => $bytesPerInsert]);
     }
 
     /**

@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature\Integrity;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\Query\Builder;
@@ -34,6 +35,7 @@ use SineMacula\Laravel\AuditLog\Records\RecordFinaliser;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
 use Tests\Concerns\TampersWithTheLog;
+use Tests\Concerns\WritesTheJournal;
 use Tests\Fixtures\Integrity\InMemoryPruneLedger;
 use Tests\Fixtures\Privacy\RecordingExceptionHandler;
 use Tests\Fixtures\Records\RecordFactory;
@@ -54,7 +56,7 @@ use Tests\TestCase;
 #[CoversClass(SegmentVerifier::class)]
 final class TamperingTest extends TestCase
 {
-    use TampersWithTheLog;
+    use TampersWithTheLog, WritesTheJournal;
 
     /** @var string When the log is sealed. */
     private const string SEALED_AT = '2026-11-01 13:00:00';
@@ -85,6 +87,15 @@ final class TamperingTest extends TestCase
 
     /** @var string A secret of the second key of an explicit ring. */
     private const string SECRET_2026 = 'audit-log tampering test key 2026 0123456789';
+
+    /** @var string An application key the test key rotates to. */
+    private const string ROTATED_APP_KEY = 'base64:cm90YXRlZCBsYXJhdmVsLWF1ZGl0LWxvZyBrZXkhISE=';
+
+    /** @var string The id of the hold journalled before the rotation. */
+    private const string HOLD_ID = '01932b4e-d000-7000-8000-000000000001';
+
+    /** @var string The id of the hold journalled after the rotation. */
+    private const string OTHER_HOLD_ID = '01932b4e-d000-7000-8000-000000000002';
 
     /** @var \Tests\Fixtures\Privacy\RecordingExceptionHandler The handler every report reaches. */
     private RecordingExceptionHandler $handler;
@@ -1095,6 +1106,50 @@ final class TamperingTest extends TestCase
         $this->useRing(['k2026' => self::SECRET_2026], 'k2026');
         $this->storeEntries(2, '2026-11-01 12:30:00.000000');
         $this->sealAll();
+
+        [$exit, $output] = $this->verify();
+
+        self::assertSame(1, $exit);
+        self::assertStringContainsString(self::line(1, $this->sealIdAt(1), 'unverifiable', 2, 'seal_key', $this->sealIdAt(1)), $output);
+        self::assertStringContainsString(self::line(2, $this->sealIdAt(2), 'valid', 2), $output);
+    }
+
+    /**
+     * Seals and journal rows signed under the key derived from `app.key` verify
+     * once it moves to `app.previous_keys`, and stop verifying when it leaves.
+     *
+     * @return void
+     */
+    public function testARotatedApplicationKeyStillVerifiesWhatItSigned(): void
+    {
+        $config = app(ConfigRepository::class);
+        $old    = $config->get('app.key');
+
+        $this->journalHold(self::HOLD_ID);
+        $this->storeEntries(2);
+        $this->sealAll();
+
+        $config->set('app.key', self::ROTATED_APP_KEY);
+        $config->set('app.previous_keys', [$old]);
+
+        $this->journalHold(self::OTHER_HOLD_ID);
+        $this->storeEntries(2, '2026-11-01 12:30:00.000000');
+        $this->sealAll();
+
+        [$exit, $output] = $this->verify();
+
+        $sealKeys    = array_column($this->seals(), 'key_id');
+        $journalKeys = array_column($this->journalRows(), 'key_id');
+
+        self::assertSame(0, $exit);
+        self::assertMatchesRegularExpression('/\Ad[0-9a-f]{16}\z/', (string) $sealKeys[0]);
+        self::assertMatchesRegularExpression('/\Ad[0-9a-f]{16}\z/', (string) $sealKeys[1]);
+        self::assertNotSame($sealKeys[0], $sealKeys[1]);
+        self::assertSame($sealKeys, $journalKeys);
+        self::assertStringContainsString("Integrity: 2 valid, 0 pruned, 0 incomplete, 0 unverifiable, 0 tampered.\n", $output);
+        self::assertStringContainsString("Journal: 2 rows to sequence 2; the latest seal commits to 2.\n", $output);
+
+        $config->set('app.previous_keys', []);
 
         [$exit, $output] = $this->verify();
 

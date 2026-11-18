@@ -212,7 +212,7 @@ final class KeyCachingTest extends TestCase
         app()->bind(FieldEncrypter::class, static function () use ($encrypters): FieldEncrypter {
             $encrypter = app(SubjectKeyEncrypter::class);
 
-            $encrypters->append(spl_object_id($encrypter));
+            $encrypters->append($encrypter);
 
             return $encrypter;
         });
@@ -220,7 +220,7 @@ final class KeyCachingTest extends TestCase
         app()->bind(FieldReader::class, static function () use ($readers): FieldReader {
             $reader = app(SubjectKeyFieldReader::class);
 
-            $readers->append(spl_object_id($reader));
+            $readers->append($reader);
 
             return $reader;
         });
@@ -233,11 +233,12 @@ final class KeyCachingTest extends TestCase
         $this->cardOf($first->id);
         $this->cardOf($second->id);
 
-        self::assertGreaterThanOrEqual(2, count($encrypters));
-        self::assertCount(count($encrypters), array_unique($encrypters->getArrayCopy()));
-        self::assertGreaterThanOrEqual(2, count($readers));
-        self::assertNotSame(app(SubjectKeyEncrypter::class), app(SubjectKeyEncrypter::class));
-        self::assertNotSame(app(SubjectKeyFieldReader::class), app(SubjectKeyFieldReader::class));
+        foreach ([$encrypters, $readers] as $resolved) {
+            $objects = $resolved->getArrayCopy();
+
+            self::assertGreaterThanOrEqual(2, count($objects));
+            self::assertCount(count($objects), array_unique(array_map(spl_object_id(...), $objects)));
+        }
     }
 
     /**

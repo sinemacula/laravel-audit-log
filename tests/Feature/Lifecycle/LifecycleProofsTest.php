@@ -571,6 +571,41 @@ final class LifecycleProofsTest extends TestCase
     }
 
     /**
+     * A reconciliation looking back past retention never stores a pruned
+     * lifecycle record again, and `audit-log:verify` then passes.
+     *
+     * @return void
+     */
+    public function testAReconcileLongerThanRetentionNeverRestoresAPrunedRecord(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.retention.after_days', 30);
+
+        CarbonImmutable::setTestNow(new CarbonImmutable('2026-10-16 15:00:00', 'UTC'));
+
+        $this->placeHold(['--tenant' => ['organisation:org_held'], '--basis' => 'legal_claim']);
+
+        $held = $this->readRecords('audit_log.held');
+
+        self::assertCount(1, $held);
+
+        CarbonImmutable::setTestNow(new CarbonImmutable(self::NOW, 'UTC'));
+
+        $this->seal();
+
+        self::assertSame('complete', $this->jsonOf('audit-log:prune')['status']);
+        self::assertSame([], $this->present([self::idOf($held[0])]));
+
+        $reconciled = $this->jsonOf('audit-log:reconcile', ['--since' => '90']);
+
+        self::assertSame([0, 2], [$reconciled['recorded'], $reconciled['already_recorded']]);
+        self::assertSame([], $this->readRecords('audit_log.held'));
+
+        $verified = $this->verify();
+
+        self::assertSame([0, ['pruned'], []], [$verified['exit'], $verified['segments'], $verified['findings']]);
+    }
+
+    /**
      * Prune, release and reinstate keep working once the signing ring moves to
      * `k2` keeping `k1`, and `audit-log:verify` then passes.
      *

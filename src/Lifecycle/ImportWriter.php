@@ -43,6 +43,9 @@ final readonly class ImportWriter
     /** @var int Rows per insert on MySQL and PostgreSQL, under 65,535 placeholders. */
     public const int ROWS_PER_INSERT = 1000;
 
+    /** @var int Bytes of values per insert, 16 MiB: a quarter of MySQL's default `max_allowed_packet`. */
+    public const int BYTES_PER_INSERT = 16777216;
+
     /** @var int Attempts at a chunk's rows: the first, and one after a violation. */
     public const int ATTEMPTS = 2;
 
@@ -69,6 +72,7 @@ final readonly class ImportWriter
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\ImportBatches  $batches
      * @param  \SineMacula\Laravel\AuditLog\Database\FailureClassifier  $failures
      * @param  \Illuminate\Contracts\Debug\ExceptionHandler  $reporter
+     * @param  int  $bytesPerInsert
      */
     public function __construct(
 
@@ -95,6 +99,9 @@ final readonly class ImportWriter
 
         /** Reports a failed past-retention count. */
         private ExceptionHandler $reporter,
+
+        /** The most bytes of values one insert sends; `BYTES_PER_INSERT` unless a test lowers it. */
+        private int $bytesPerInsert = self::BYTES_PER_INSERT,
     ) {}
 
     /**
@@ -272,7 +279,7 @@ final readonly class ImportWriter
             $plan    = $this->classifier->classify($connection, $lines);
             $planned = $plan;
 
-            self::insert($connection, array_map(static fn (#[\SensitiveParameter] ImportLine $line): array => $rows[$line->number], $plan->lines));
+            $this->insert($connection, array_map(static fn (#[\SensitiveParameter] ImportLine $line): array => $rows[$line->number], $plan->lines));
 
             KeyUses::insert($connection, array_merge(...array_map(static fn (#[\SensitiveParameter] ImportLine $line): array => $uses[$line->number], $plan->lines)));
 
@@ -444,20 +451,36 @@ final readonly class ImportWriter
     }
 
     /**
-     * Insert the rows in groups the engine's placeholder limit allows.
+     * Insert the rows in groups within the engine's placeholder limit and the
+     * bytes per insert; a row larger than those bytes goes alone.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  list<array<string, int|string|null>>  $rows
      * @return void
      */
-    private static function insert(Connection $connection, #[\SensitiveParameter] array $rows): void
+    private function insert(Connection $connection, #[\SensitiveParameter] array $rows): void
     {
         $size  = $connection->getDriverName() === 'sqlite' ? self::SQLITE_ROWS_PER_INSERT : self::ROWS_PER_INSERT;
         $table = EntrySettings::table();
+        $group = [];
+        $left  = $this->bytesPerInsert;
 
-        foreach (array_chunk($rows, $size) as $group) {
-            $connection->table($table)->insert($group);
+        // Laravel sends no query for an empty group.
+        foreach ($rows as $row) {
+            $length = array_sum(array_map(static fn (int|string|null $value): int => strlen((string) $value), $row));
+
+            if (count($group) === $size || $length > $left) {
+                $connection->table($table)->insert($group);
+
+                $group = [];
+                $left  = $this->bytesPerInsert;
+            }
+
+            $group[] = $row;
+            $left -= $length;
         }
+
+        $connection->table($table)->insert($group);
     }
 
     /**

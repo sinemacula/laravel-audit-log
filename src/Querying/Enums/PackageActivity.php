@@ -80,26 +80,6 @@ enum PackageActivity: string implements DefinesAuditEvents
     }
 
     /**
-     * Whether the activity reads the trail, an export's verification included.
-     *
-     * @return bool
-     */
-    public function isRead(): bool
-    {
-        return match ($this) {
-            self::EXPORT_PUBLISH_FAILED,
-            self::PRUNED,
-            self::HELD,
-            self::RELEASED,
-            self::IMPORTED,
-            self::SUBJECT_ERASED,
-            self::KEYS_REWRAPPED,
-            self::KEYS_REINSTATED => false,
-            default               => true,
-        };
-    }
-
-    /**
      * Whether retention never prunes the code's entries, as an export's journal
      * is its evidence.
      *
