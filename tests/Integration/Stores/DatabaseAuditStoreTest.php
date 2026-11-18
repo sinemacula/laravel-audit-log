@@ -665,7 +665,8 @@ final class DatabaseAuditStoreTest extends TestCase
     }
 
     /**
-     * A duplicate's lookup locks only on MySQL inside a transaction.
+     * A duplicate's lookup reads the writer, and locks only on MySQL inside a
+     * transaction, nested or not.
      *
      * @return void
      */
@@ -673,6 +674,7 @@ final class DatabaseAuditStoreTest extends TestCase
     {
         $finalised  = $this->finalised();
         $connection = $this->storageConnection();
+        $unlocked   = '/\b(lock|for share|for update)\b/i';
         $reads      = [];
 
         $this->store()->store($finalised);
@@ -685,22 +687,83 @@ final class DatabaseAuditStoreTest extends TestCase
             $reads[] = $query;
         });
 
-        $this->store()->store($finalised);
+        $connection->setReadPdo(static fn () => throw new \LogicException('The lookup read the replica.'));
+
+        try {
+            $this->store()->store($finalised);
+        } finally {
+            $connection->setReadPdo(null);
+        }
 
         $connection->beginTransaction();
         $this->store()->store($finalised);
+        $connection->beginTransaction();
+        $this->store()->store($finalised);
+        $connection->commit();
         $connection->commit();
 
-        self::assertCount(2, $reads);
-        self::assertDoesNotMatchRegularExpression('/\b(lock|for share|for update)\b/i', $reads[0]);
+        self::assertCount(3, $reads);
+        self::assertDoesNotMatchRegularExpression($unlocked, $reads[0]);
 
         if ($connection->getDriverName() === 'mysql') {
             self::assertStringEndsWith(' lock in share mode', $reads[1]);
+            self::assertStringEndsWith(' lock in share mode', $reads[2]);
 
             return;
         }
 
-        self::assertDoesNotMatchRegularExpression('/\b(lock|for share|for update)\b/i', $reads[1]);
+        self::assertDoesNotMatchRegularExpression($unlocked, $reads[1]);
+        self::assertDoesNotMatchRegularExpression($unlocked, $reads[2]);
+    }
+
+    /**
+     * Rows of `[level, locks]`: when the lookup takes a shared lock on MySQL.
+     *
+     * @return iterable<string, array{0: int, 1: bool}>
+     */
+    public static function provideMySqlLookupLocks(): iterable
+    {
+        yield from [
+            'inside a transaction'  => [1, true],
+            'inside a nested one'   => [2, true],
+            'outside a transaction' => [0, false],
+        ];
+    }
+
+    /**
+     * The MySQL lock branch, observed on the builder when the suite runs on
+     * another engine.
+     *
+     * @param  int  $level
+     * @param  bool  $locks
+     * @return void
+     */
+    #[DataProvider('provideMySqlLookupLocks')]
+    public function testOnMySqlTheLookupLocksOnlyInsideATransaction(int $level, bool $locks): void
+    {
+        $finalised  = $this->finalised();
+        $duplicate  = new UniqueConstraintViolationException('testing', 'insert into "audit_log_entries"', [], new \PDOException('duplicate'));
+        $builder    = \Mockery::mock(Builder::class);
+        $connection = \Mockery::mock(Connection::class);
+
+        $connection->shouldReceive('transactionLevel')->andReturn($level);
+        $connection->shouldReceive('getDriverName')->andReturn('mysql');
+        $connection->shouldReceive('table')->with(EntrySettings::DEFAULT_TABLE)->andReturn($builder);
+        $connection->shouldReceive('transaction')->times($level > 0 ? 1 : 0)->andThrow($duplicate);
+
+        $builder->shouldReceive('insert')->times($level > 0 ? 0 : 1)->andThrow($duplicate);
+        $builder->shouldReceive('useWritePdo')->once()->andReturnSelf();
+        $builder->shouldReceive('where')->once()->with('id', self::ID)->andReturnSelf();
+        $builder->shouldReceive('sharedLock')->times($locks ? 1 : 0)->andReturnSelf();
+        $builder->shouldReceive('first')->once()->andReturn((object) (new RowCodec)->encode($finalised));
+
+        $connections = \Mockery::mock(ConnectionResolverInterface::class);
+
+        $connections->shouldReceive('connection')->with(null)->andReturn($connection);
+
+        $tombstones = new PruneTombstones($connections, new NullPruneLedger, app(PruneCoverage::class));
+
+        (new DatabaseAuditStore($connections, new RowCodec, app(RecordSigner::class), $tombstones))->store($finalised);
     }
 
     /**
@@ -749,59 +812,6 @@ final class DatabaseAuditStoreTest extends TestCase
         $this->expectExceptionMessage('The storage connection [testing] is not a database connection that supports transactions.');
 
         $store->store($this->finalised());
-    }
-
-    /**
-     * Rows of `[driver, level, locks]`: when the lookup takes a shared lock.
-     *
-     * @return iterable<string, array{0: string, 1: int, 2: bool}>
-     */
-    public static function provideLookupLocks(): iterable
-    {
-        yield from [
-            'MySQL inside a transaction'      => ['mysql', 1, true],
-            'MySQL inside a nested one'       => ['mysql', 2, true],
-            'MySQL outside a transaction'     => ['mysql', 0, false],
-            'PostgreSQL inside a transaction' => ['pgsql', 1, false],
-            'SQLite inside a transaction'     => ['sqlite', 1, false],
-        ];
-    }
-
-    /**
-     * The lookup reads the writer and locks only on MySQL in a transaction;
-     * SQLite compiles no lock, so the builder is observed.
-     *
-     * @param  string  $driver
-     * @param  int  $level
-     * @param  bool  $locks
-     * @return void
-     */
-    #[DataProvider('provideLookupLocks')]
-    public function testTheLookupTakesASharedLockOnlyOnMySqlInsideATransaction(string $driver, int $level, bool $locks): void
-    {
-        $finalised  = $this->finalised();
-        $duplicate  = new UniqueConstraintViolationException('testing', 'insert into "audit_log_entries"', [], new \PDOException('duplicate'));
-        $builder    = \Mockery::mock(Builder::class);
-        $connection = \Mockery::mock(Connection::class);
-
-        $connection->shouldReceive('transactionLevel')->andReturn($level);
-        $connection->shouldReceive('getDriverName')->andReturn($driver);
-        $connection->shouldReceive('table')->with(EntrySettings::DEFAULT_TABLE)->andReturn($builder);
-        $connection->shouldReceive('transaction')->times($level > 0 ? 1 : 0)->andThrow($duplicate);
-
-        $builder->shouldReceive('insert')->times($level > 0 ? 0 : 1)->andThrow($duplicate);
-        $builder->shouldReceive('useWritePdo')->once()->andReturnSelf();
-        $builder->shouldReceive('where')->once()->with('id', self::ID)->andReturnSelf();
-        $builder->shouldReceive('sharedLock')->times($locks ? 1 : 0)->andReturnSelf();
-        $builder->shouldReceive('first')->once()->andReturn((object) (new RowCodec)->encode($finalised));
-
-        $connections = \Mockery::mock(ConnectionResolverInterface::class);
-
-        $connections->shouldReceive('connection')->with(null)->andReturn($connection);
-
-        $tombstones = new PruneTombstones($connections, new NullPruneLedger, app(PruneCoverage::class));
-
-        (new DatabaseAuditStore($connections, new RowCodec, app(RecordSigner::class), $tombstones))->store($finalised);
     }
 
     /**

@@ -7,8 +7,9 @@ namespace SineMacula\Laravel\AuditLog\Database;
 use Illuminate\Support\Facades\Config;
 
 /**
- * The entries and artifacts table names, read on every call and refused unless
- * every index name derived from them fits PostgreSQL's 63 characters.
+ * The entries and artifacts table names, read on every call; an unset, `null`
+ * or empty setting names the default, and any other name is refused unless
+ * every index name derived from it fits PostgreSQL's 63 characters.
  *
  * Lower case only, since MySQL's `lower_case_table_names` differs per server.
  *
@@ -67,8 +68,8 @@ final class EntrySettings
     }
 
     /**
-     * The table setting under the key, or the default, refused with a message
-     * naming the key unless it fits the grammar.
+     * The table setting under the key, or the default when unset, `null` or
+     * empty, refused with a message naming the key unless it fits the grammar.
      *
      * @param  string  $key
      * @param  string  $default
@@ -78,7 +79,11 @@ final class EntrySettings
      */
     public static function configuredTable(string $key, string $default): string
     {
-        $table = Config::get($key, $default);
+        $table = Config::get($key);
+
+        if ($table === null || $table === '') {
+            return $default;
+        }
 
         if (!is_string($table) || preg_match(self::TABLE_PATTERN, $table) !== 1) {
             $message = sprintf(

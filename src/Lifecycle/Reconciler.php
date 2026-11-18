@@ -23,7 +23,7 @@ use SineMacula\Laravel\AuditLog\Support\StoredTime;
 
 /**
  * Writes again, through `LifecycleRecorder`, the activity records the journal
- * says are missing within the days looked back.
+ * says are missing within the days looked back, never one retention pruned.
  *
  * It takes no lifecycle lock, so it is never scheduled; a record's derived id
  * makes a concurrent second write fail on the primary key.
@@ -55,6 +55,7 @@ final readonly class Reconciler
      * @param  \SineMacula\Laravel\AuditLog\Lifecycle\LifecycleRecorder  $recorder
      * @param  \SineMacula\Laravel\AuditLog\Contracts\Clock  $clock
      * @param  \SineMacula\Laravel\AuditLog\Delivery\DeliverySettings  $delivery
+     * @param  \SineMacula\Laravel\AuditLog\Lifecycle\PruneTombstones  $tombstones
      */
     public function __construct(
 
@@ -72,6 +73,9 @@ final readonly class Reconciler
 
         /** The delivery mode, which says whether a record may wait in the outbox. */
         private DeliverySettings $delivery,
+
+        /** Say whether retention has already pruned a record. */
+        private PruneTombstones $tombstones,
     ) {}
 
     /**
@@ -298,8 +302,9 @@ final readonly class Reconciler
     }
 
     /**
-     * Each operation recorded already, by code and operation id; properties are
-     * decoded in PHP, never by JSON path, so every engine reads them alike.
+     * Each operation recorded already, stored, waiting in the outbox or pruned,
+     * by code and operation id; properties are decoded in PHP, never by JSON
+     * path, so every engine reads them alike.
      *
      * @formatter:off
      *
@@ -357,6 +362,8 @@ final readonly class Reconciler
         if ($this->delivery->mode() === DeliveryMode::OUTBOX) {
             $ids = [...$ids, ...$present($this->database->connection(DeliveryTables::resolvedOutboxConnection()), DeliveryTables::outboxTable())];
         }
+
+        $ids = [...$ids, ...$this->tombstones->prunedAmong(array_keys($keys))];
 
         foreach (array_intersect_key($keys, array_flip($ids)) as $key) {
             $recorded[$key] = true;
