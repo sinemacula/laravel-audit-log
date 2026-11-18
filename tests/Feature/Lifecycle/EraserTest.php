@@ -756,6 +756,56 @@ final class EraserTest extends TestCase
     }
 
     /**
+     * More keys than one statement names are each tombstoned, in id-list
+     * chunks.
+     *
+     * @return void
+     *
+     * @throws \Random\RandomException
+     */
+    public function testMoreKeysThanAStatementNamesAreEachTombstoned(): void
+    {
+        $ids = [];
+
+        foreach (range(1, Eraser::STATEMENT_IDS + 1) as $number) {
+            $key = $this->signedSubjectKey(new KeyUnit(self::owner(), null, 'category_' . $number), 1, random_bytes(32));
+
+            $this->insertSubjectKey($key);
+
+            $ids[] = $key->id;
+        }
+
+        /** @var \ArrayObject<int, string> $updates */
+        $updates = new \ArrayObject;
+
+        DB::listen(static function (QueryExecuted $query) use ($updates): void {
+            if (!str_starts_with($query->sql, 'update') || !str_contains($query->sql, KeyTables::subjectKeysTable())) {
+                return;
+            }
+
+            $updates->append($query->sql);
+        });
+
+        $result    = $this->erase(self::owner());
+        $destroyed = $this->lastPayload()['destroyed'] ?? null;
+
+        sort($ids, SORT_STRING);
+
+        self::assertIsArray($destroyed);
+        self::assertSame([ErasureStatus::COMPLETE, Eraser::STATEMENT_IDS + 1], [$result->status, $result->keysDestroyed]);
+        self::assertSame($ids, array_column($destroyed, 'key_id'));
+        self::assertCount(2, $updates);
+
+        $stored = $this->storedSubjectKeys();
+
+        self::assertEqualsCanonicalizing($ids, array_keys($stored));
+
+        foreach ($stored as $id => $key) {
+            self::assertSame([KeyState::ERASED, null, $result->erasureId], [$key->state, $key->wrappedKey, $key->erasureId], $id);
+        }
+    }
+
+    /**
      * A journal that fails verification refuses the erasure and nothing is
      * written.
      *
