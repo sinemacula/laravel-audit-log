@@ -23,6 +23,7 @@ use SineMacula\Laravel\AuditLog\Integrity\OwnerFingerprint;
 use SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle;
 use SineMacula\Laravel\AuditLog\Lifecycle\Authority;
 use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
+use SineMacula\Laravel\AuditLog\Lifecycle\Enums\HoldBasis;
 use SineMacula\Laravel\AuditLog\Lifecycle\HoldScope;
 use SineMacula\Laravel\AuditLog\Lifecycle\JournalPruneLedger;
 use SineMacula\Laravel\AuditLog\Lifecycle\LifecycleEvidence;
@@ -652,6 +653,36 @@ final class ReconcilerTest extends TestCase
         self::assertSame([1, 0], [$first->recorded, $first->alreadyRecorded]);
         self::assertSame([0, 1], [$second->recorded, $second->alreadyRecorded]);
         self::assertSame([], $read);
+    }
+
+    /**
+     * A record retention pruned counts as recorded and is never written again.
+     *
+     * @return void
+     */
+    public function testAPrunedRecordIsNeverWrittenAgain(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.retention.after_days', 30);
+
+        CarbonImmutable::setTestNow(new CarbonImmutable('2026-09-03 09:00:00', 'UTC'));
+
+        $lifecycle = app(AuditLifecycle::class);
+
+        self::assertTrue($lifecycle->hold(HoldScope::tenants(Reference::of('organisation', 'org_held')), self::authority(), HoldBasis::LEGAL_CLAIM)->recorded);
+
+        CarbonImmutable::setTestNow(new CarbonImmutable(self::NOW, 'UTC'));
+
+        $this->sealAt(self::NOW);
+        $this->sealAll();
+
+        $pruned = $lifecycle->prune();
+
+        self::assertSame([1, true], [$pruned->deleted, $pruned->recorded]);
+
+        $result = $this->reconciler()->reconcile(90);
+
+        self::assertSame([0, 2], [$result->recorded, $result->alreadyRecorded]);
+        self::assertSame([], $this->readRecords(PackageActivity::HELD->value));
     }
 
     /**
