@@ -17,6 +17,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
 use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Database\InstallationMismatchException;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
 use SineMacula\Laravel\AuditLog\Delivery\Replayer;
@@ -33,6 +34,7 @@ use SineMacula\Laravel\AuditLog\Runtime\WriteGuard;
 use SineMacula\Laravel\AuditLog\Stores\FailureSpill;
 use SineMacula\Laravel\AuditLog\Stores\StackAuditStore;
 use SineMacula\Laravel\AuditLog\Support\StoredTime;
+use Tests\Concerns\ConnectsSecondDatabases;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\Concerns\InteractsWithOutbox;
 use Tests\Concerns\SeedsArtifacts;
@@ -58,7 +60,7 @@ use Tests\TestCase;
 #[CoversClass(SpillLine::class)]
 final class ReplayerTest extends TestCase
 {
-    use InteractsWithAuditStore, InteractsWithOutbox, SeedsArtifacts, SeedsTheOutbox;
+    use ConnectsSecondDatabases, InteractsWithAuditStore, InteractsWithOutbox, SeedsArtifacts, SeedsTheOutbox;
 
     /** @var string When each test starts. */
     private const string NOW = '2026-11-01T12:00:00.000000Z';
@@ -504,6 +506,39 @@ final class ReplayerTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
 
         $this->replayer()->spill(sys_get_temp_dir() . '/audit-log-no-such-spill-file.log', false);
+    }
+
+    /**
+     * A maintenance connection that reads another installation refuses the
+     * replay before any line is stored; a dry run still counts the line.
+     *
+     * @return void
+     */
+    public function testAnotherInstallationIsRefusedBeforeAnyLineIsStored(): void
+    {
+        $record   = $this->finalisedRecord();
+        $path     = $this->file(self::lineOf($record) . "\n");
+        $recorded = 0;
+
+        Event::listen(AuditRecorded::class, static function () use (&$recorded): void {
+            $recorded++;
+        });
+
+        $this->anotherInstallation();
+
+        app(ConfigRepository::class)->set('audit-log.storage.maintenance_connection', self::OTHER);
+
+        try {
+            $this->replayer()->spill($path, false);
+
+            self::fail('Expected the replay to be refused.');
+        } catch (InstallationMismatchException) {
+            // The refusal under test
+        }
+
+        self::assertSame(0, $this->entryCount());
+        self::assertSame(0, $recorded);
+        self::assertSame([0, 1, 0, 0, []], self::tally($this->replayer()->spill($path, true)));
     }
 
     /**

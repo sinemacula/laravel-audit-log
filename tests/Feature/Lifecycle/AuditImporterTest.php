@@ -238,6 +238,25 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
+     * An empty file imports `complete` with zero counts.
+     *
+     * @return void
+     */
+    public function testAnEmptyFileImportsCompleteWithZeroCounts(): void
+    {
+        $path = $this->file([]);
+
+        file_put_contents($path, '');
+
+        $result = $this->importer()->import(ImportSource::fromFile($path, self::SOURCE), self::authority());
+
+        self::assertSame(ImportStatus::COMPLETE, $result->status);
+        self::assertSame([0, 0, 0, 0, 0], [$result->linesRead, $result->imported, $result->duplicates, $result->conflicts, $result->rejected]);
+        self::assertSame([JournalKind::IMPORT_STARTED, JournalKind::IMPORT_FINISHED], $this->journalKinds());
+        self::assertSame(0, $this->rowsIn(EntrySettings::table()));
+    }
+
+    /**
      * Importing the same file twice stores each record once.
      *
      * @return void
@@ -252,6 +271,24 @@ final class AuditImporterTest extends TestCase
         self::assertSame([0, 2, 0], [$second->imported, $second->duplicates, $second->conflicts]);
         self::assertSame(ImportStatus::COMPLETE, $second->status);
         self::assertSame(2, $this->rowsIn(EntrySettings::table()));
+    }
+
+    /**
+     * A line sent again with its property and context keys reordered is a
+     * duplicate.
+     *
+     * @return void
+     */
+    public function testALineResentWithItsKeysReorderedIsADuplicate(): void
+    {
+        $sent   = ['properties' => ['amount' => '1200.00', 'currency' => 'GBP'], 'context' => ['channel' => 'api', 'region' => 'eu']];
+        $resent = ['properties' => ['currency' => 'GBP', 'amount' => '1200.00'], 'context' => ['region' => 'eu', 'channel' => 'api']];
+
+        $this->importer()->import(ImportSource::fromFile($this->file([self::line('rec-1', $sent)]), self::SOURCE), self::authority());
+
+        $again = $this->importer()->import(ImportSource::fromFile($this->file([self::line('rec-1', $resent)]), self::SOURCE), self::authority());
+
+        self::assertSame([ImportStatus::COMPLETE, 0, 1, 0], [$again->status, $again->imported, $again->duplicates, $again->conflicts]);
     }
 
     /**
@@ -427,6 +464,42 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
+     * A failure in a later chunk keeps the chunks before it and fails the batch
+     * with their counts.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAFailureInALaterChunkKeepsTheEarlierChunks(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.import.chunk', 100);
+
+        DB::listen(static function (QueryExecuted $query): void {
+            if (str_starts_with(strtolower($query->sql), 'insert') && str_contains($query->sql, EntrySettings::table()) && in_array('rec-100', $query->bindings, true)) {
+                throw new \RuntimeException('The second chunk could not be written.');
+            }
+        });
+
+        try {
+            $lines = array_map(static fn (int $line): string => self::line(sprintf('rec-%03d', $line)), range(0, 149));
+
+            $this->importer()->import(ImportSource::fromFile($this->file($lines), self::SOURCE), self::authority());
+            self::fail('Expected the second chunk to fail.');
+        } catch (\RuntimeException $exception) {
+            self::assertSame('The second chunk could not be written.', $exception->getMessage());
+        }
+
+        $batch  = $this->allBatches()[0];
+        $finish = json_decode((string) $this->journalRows()[1]['payload'], true);
+
+        self::assertSame(100, $this->rowsIn(EntrySettings::table()));
+        self::assertSame(['failed', 150, 100], [$batch['status'], (int) $batch['lines_read'], (int) $batch['imported']]);
+        self::assertIsArray($finish);
+        self::assertSame(['failed', 150, 100], [$finish['status'] ?? null, $finish['lines_read'] ?? null, $finish['imported'] ?? null]);
+    }
+
+    /**
      * A file that changed between its two reads fails the batch.
      *
      * @return void
@@ -572,11 +645,11 @@ final class AuditImporterTest extends TestCase
     }
 
     /**
-     * Importing a line again after its row was pruned creates a new row.
+     * Importing a line again after its stored row is gone creates a new row.
      *
      * @return void
      */
-    public function testAReimportAfterAPruneCreatesNewRows(): void
+    public function testAReimportAfterTheStoredRowsAreGoneCreatesNewRows(): void
     {
         $path = $this->file([self::line('rec-1')]);
 
@@ -607,6 +680,64 @@ final class AuditImporterTest extends TestCase
 
         self::assertSame(1, $planned->pastRetention);
         self::assertSame(1, $result->pastRetention);
+    }
+
+    /**
+     * The past-retention count asks the policy with each line's tenant.
+     *
+     * @return void
+     */
+    public function testThePastRetentionCountAsksThePolicyWithEachLinesTenant(): void
+    {
+        app()->instance(RetentionPolicy::class, new class implements RetentionPolicy {
+            /**
+             * The policy's version.
+             *
+             * @return string
+             */
+            #[\Override]
+            public function version(): string
+            {
+                return 'custom:1';
+            }
+
+            /**
+             * Seven days for tenant `org_a`, forever for anyone else.
+             *
+             * @param  string  $category
+             * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $tenant
+             * @return ?int
+             */
+            #[\Override]
+            public function retainFor(string $category, ?Reference $tenant): ?int
+            {
+                return $tenant?->id === 'org_a' ? 7 : null;
+            }
+
+            /**
+             * Nothing obliges the package to keep anything.
+             *
+             * @param  string  $category
+             * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $tenant
+             * @return ?int
+             */
+            #[\Override]
+            public function preserveFor(string $category, ?Reference $tenant): ?int
+            {
+                return null;
+            }
+        });
+
+        $path = $this->file([
+            self::line('rec-1', ['tenant' => ['type' => 'organisation', 'id' => 'org_a']]),
+            self::line('rec-2', ['tenant' => ['type' => 'organisation', 'id' => 'org_b']]),
+            self::line('rec-3', ['tenant' => null]),
+        ]);
+
+        $planned = $this->importer()->import(ImportSource::fromFile($path, self::SOURCE), self::authority(), dryRun: true);
+        $result  = $this->importer()->import(ImportSource::fromFile($path, self::SOURCE), self::authority());
+
+        self::assertSame([1, 1], [$planned->pastRetention, $result->pastRetention]);
     }
 
     /**
@@ -764,6 +895,73 @@ final class AuditImporterTest extends TestCase
         self::assertSame('stale.import', $finish->reason);
         self::assertSame($result->operationId, $finish->operationId);
         self::assertSame('interrupted', json_decode($finish->payload ?? '{}', true)['status'] ?? null);
+    }
+
+    /**
+     * Close keeps the counts, conflicts and hold a killed batch's committed
+     * chunks wrote.
+     *
+     * @return void
+     */
+    public function testCloseKeepsTheCountsAKilledBatchHolds(): void
+    {
+        $batchId = $this->runningBatch();
+        $holdId  = '01932b4e-d000-7000-8000-000000000001';
+
+        DB::connection(StorageConnection::name())->table(LifecycleTables::importBatchesTable())->where('id', $batchId)->update([
+            'lines_read'   => 150,
+            'imported'     => 97,
+            'duplicates'   => 1,
+            'conflicts'    => 2,
+            'rejected'     => 3,
+            'conflict_ids' => '["rec-7","rec-9"]',
+            'hold_id'      => $holdId,
+        ]);
+
+        $result = $this->importer()->close($batchId, self::authority());
+        $batch  = $this->batch($batchId);
+        $finish = json_decode((string) $this->journalRows()[1]['payload'], true);
+
+        self::assertSame('interrupted', $batch['status']);
+        self::assertSame([150, 97, 1, 2, 3], array_map(intval(...), [$batch['lines_read'], $batch['imported'], $batch['duplicates'], $batch['conflicts'], $batch['rejected']]));
+        self::assertSame(['["rec-7","rec-9"]', $holdId], [$batch['conflict_ids'], $batch['hold_id']]);
+        self::assertSame([150, 97, 1, 2, 3], [$result->linesRead, $result->imported, $result->duplicates, $result->conflicts, $result->rejected]);
+        self::assertSame([['rec-7', 'rec-9'], $holdId], [$result->conflictIds, $result->holdId]);
+        self::assertIsArray($finish);
+        self::assertSame([150, 97, 1, 2, 3], [
+            $finish['lines_read'] ?? null, $finish['imported'] ?? null, $finish['duplicates'] ?? null, $finish['conflicts'] ?? null, $finish['rejected'] ?? null,
+        ]);
+    }
+
+    /**
+     * Closing a batch while its import is still writing fails the import before
+     * any entry and leaves one finish.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testClosingABatchWhileItsImportWritesFailsTheImport(): void
+    {
+        $closed = null;
+
+        $close = function (ImportResult $started) use (&$closed): void {
+            $closed = $this->importer()->close((string) $started->batchId, self::authority());
+        };
+
+        try {
+            $this->importer()->import(ImportSource::fromFile($this->file([self::line('rec-1')]), self::SOURCE), self::authority(), started: $close);
+            self::fail('Expected the import to fail.');
+        } catch (\LogicException $exception) {
+            self::assertSame('The import batch is no longer running, and is not written to.', $exception->getMessage());
+        }
+
+        self::assertSame(ImportStatus::INTERRUPTED, $closed?->status);
+        self::assertSame(0, $this->rowsIn(EntrySettings::table()));
+        self::assertSame('interrupted', $this->allBatches()[0]['status'] ?? null);
+        self::assertSame([JournalKind::IMPORT_STARTED, JournalKind::IMPORT_FINISHED], $this->journalKinds());
+        self::assertSame('interrupted', json_decode((string) $this->journalRows()[1]['payload'], true)['status'] ?? null);
+        self::assertSame([], $this->journalFindings());
     }
 
     /**
