@@ -17,6 +17,7 @@ use SineMacula\Laravel\AuditLog\Integrity\Enums\KeyState;
 use SineMacula\Laravel\AuditLog\Integrity\SubjectKeyRow;
 use SineMacula\Laravel\AuditLog\Keys\KeyStore;
 use SineMacula\Laravel\AuditLog\Keys\KeyUnit;
+use SineMacula\Laravel\AuditLog\Keys\KeyUses;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use Tests\Concerns\InteractsWithReadWriteSplit;
 use Tests\Concerns\MakesSubjectKeys;
@@ -133,6 +134,30 @@ final class KeyStoreTest extends TestCase
         self::assertSame($second->id, self::store()->liveOf($this->keyConnection(), $rotated)?->id);
         self::assertNull(self::store()->liveOf($this->keyConnection(), $superseded));
         self::assertNull(self::store()->liveOf($this->keyConnection(), $gone));
+    }
+
+    /**
+     * A unit with two live rows, as a superseded row flipped back where no
+     * trigger refuses it, reads its highest generation.
+     *
+     * @return void
+     */
+    public function testOfTwoLiveRowsTheHighestGenerationIsRead(): void
+    {
+        $owner = Reference::of('App\Models\User', '42');
+        $unit  = new KeyUnit($owner, null, 'default');
+
+        [$first] = $this->makeSubjectKey($owner);
+
+        $this->supersede($first->id);
+
+        [$second] = $this->makeSubjectKey($owner);
+
+        $this->keyConnection()->table(KeyTables::subjectKeysTable())->where('id', $first->id)->update(['state' => KeyState::LIVE->value]);
+
+        self::assertSame(2, $second->generation);
+        self::assertSame($second->id, self::store()->liveFor([$unit])[$unit->digest()]->id);
+        self::assertSame($second->id, self::store()->liveOf($this->keyConnection(), $unit)?->id);
     }
 
     /**
@@ -283,6 +308,28 @@ final class KeyStoreTest extends TestCase
         self::assertSame([], self::store()->erasureRows([]));
         self::assertSame([], self::store()->erasureRows(['not-a-uuid']));
         self::assertSame([], $this->statements);
+    }
+
+    /**
+     * More erasure ids than SQLite binds at once are read 400 to a statement
+     * there and in one elsewhere, every row returned.
+     *
+     * @return void
+     */
+    public function testMoreErasureIdsThanSqliteBindsAtOnceAreAllRead(): void
+    {
+        $ids = [];
+
+        for ($owner = 0; $owner <= KeyUses::SQLITE_ROWS_PER_STATEMENT; $owner++) {
+            $ids[] = $this->eraseByHand(Reference::of('App\Models\User', (string) $owner))->id;
+        }
+
+        $this->listen();
+
+        $rows = self::store()->erasureRows($ids);
+
+        self::assertCount($this->keyConnection()->getDriverName() === 'sqlite' ? 2 : 1, $this->statements);
+        self::assertEqualsCanonicalizing($ids, array_keys($rows));
     }
 
     /**
