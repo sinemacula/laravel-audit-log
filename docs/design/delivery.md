@@ -177,7 +177,9 @@ one, a dedicated file:
 - **Access.** The file holds whole records, so `permission` is `0600` and it belongs to the application's user alone. A
   stack that sends `critical` to an alerting channel sends the record there too, which is why the channel is dedicated.
 - **Rotation.** A `single` file grows until something rotates it, and a `daily` channel's `days` deletes old files
-  whether or not they were replayed. Replay reads one file per run, so a rotated file is replayed by its own name.
+  whether or not they were replayed. Replay reads one file per run, so a rotated file is replayed by its own name. A
+  non-empty file holding no spill line, such as a compressed one or another log, is refused and exits non-zero, so
+  decompress a rotated file before replaying it.
 - **Retention.** Replay reads a file and never edits or deletes it. Delete a file once a replay of it exits zero and it
   has passed the retention the application sets for personal data. A file holding skipped lines is a quarantine, kept
   for as long as someone may restore their key.

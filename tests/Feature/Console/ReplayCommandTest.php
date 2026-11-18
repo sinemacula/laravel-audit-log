@@ -379,6 +379,31 @@ final class ReplayCommandTest extends TestCase
     }
 
     /**
+     * A compressed spill holds no spill line, so it is named and fails the run.
+     *
+     * @return void
+     */
+    public function testACompressedSpillExitsNonZero(): void
+    {
+        $path = $this->file((string) gzencode(self::lineOf($this->finalisedRecord()) . "\n"));
+
+        self::assertSame(1, $this->replay(['--spill' => $path]));
+        self::assertSame(sprintf("The spill file [%s] holds no spill line.\n", $path), $this->printed());
+        self::assertSame(0, $this->entryCount());
+    }
+
+    /**
+     * An empty file replays nothing and exits zero.
+     *
+     * @return void
+     */
+    public function testAnEmptyFileExitsZero(): void
+    {
+        self::assertSame(0, $this->replay(['--spill' => $this->file('')]));
+        self::assertSame("Spill: replayed 0, would replay 0, pruned 0, failed 0, deferred 0, skipped 0.\n", $this->printed());
+    }
+
+    /**
      * What stops a run is named by its class, never its message.
      *
      * @return void

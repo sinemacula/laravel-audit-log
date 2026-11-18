@@ -22,10 +22,12 @@ use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
 use SineMacula\Laravel\AuditLog\Database\StorageConnection;
+use SineMacula\Laravel\AuditLog\Definitions\Enums\KeyOwner;
 use SineMacula\Laravel\AuditLog\Definitions\EventCatalogue;
 use SineMacula\Laravel\AuditLog\Definitions\EventDefinition;
 use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
+use SineMacula\Laravel\AuditLog\Integrity\JournalRow;
 use SineMacula\Laravel\AuditLog\Integrity\RecordSigner;
 use SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle;
 use SineMacula\Laravel\AuditLog\Lifecycle\Authority;
@@ -76,6 +78,15 @@ final class LifecycleProofsTest extends TestCase
 
     /** @var string This installation's own source. */
     private const string OWN = 'app-eu-1';
+
+    /** @var string A signing secret of 32 bytes. */
+    private const string FIRST_SECRET = 'first signing secret of 32 bytes';
+
+    /** @var string Another signing secret of 32 bytes. */
+    private const string SECOND_SECRET = 'second signing secret, 32 bytes!';
+
+    /** @var array<string, string> The owner every erasure names, as command arguments. */
+    private const array CUSTOMER = ['type' => 'App\Models\Customer', 'id' => '42'];
 
     /** @var array<string, string> The operator every command acts as. */
     private const array OPERATOR = ['--by-type' => 'App\Models\User', '--by-id' => '7', '--reason' => 'case.review'];
@@ -560,6 +571,80 @@ final class LifecycleProofsTest extends TestCase
     }
 
     /**
+     * Prune, release and reinstate keep working once the signing ring moves to
+     * `k2` keeping `k1`, and `audit-log:verify` then passes.
+     *
+     * @return void
+     */
+    public function testTheLifecycleKeepsWorkingAcrossASigningKeyRotation(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set(['audit-log.retention.after_days' => 30, 'audit-log.integrity.keys' => ['k1' => self::FIRST_SECRET], 'audit-log.integrity.current' => 'k1']);
+
+        $held   = $this->storeEntry(self::OLD, ['tenant_id' => 'org_held']);
+        $pruned = $this->storeEntry(self::OLD);
+
+        $this->recordSealedFor(self::customer());
+        $this->seal();
+
+        $holdId = $this->placeHold(['--tenant' => ['organisation:org_held'], '--basis' => 'legal_claim']);
+
+        self::assertSame(0, $this->command('audit-log:erase', [...self::CUSTOMER, ...self::OPERATOR])[0]);
+
+        $config->set(['audit-log.integrity.keys' => ['k1' => self::FIRST_SECRET, 'k2' => self::SECOND_SECRET], 'audit-log.integrity.current' => 'k2']);
+
+        $first = $this->jsonOf('audit-log:prune');
+
+        self::assertSame(['partial', 1, 1], [$first['status'], $first['deleted'], $first['held']]);
+        self::assertSame([$held], $this->present([$held, $pruned]));
+        self::assertSame(0, $this->command('audit-log:release', ['hold' => $holdId, ...self::OPERATOR])[0]);
+        self::assertSame(0, $this->command('audit-log:reinstate', [...self::CUSTOMER, ...self::OPERATOR])[0]);
+
+        $second = $this->jsonOf('audit-log:prune');
+
+        self::assertSame(['complete', 1, 0], [$second['status'], $second['deleted'], $second['held']]);
+        self::assertSame([], $this->present([$held, $pruned]));
+
+        $verified = $this->verify();
+
+        self::assertSame([0, []], [$verified['exit'], $verified['findings']]);
+        self::assertSame(['erasure' => 'k1', 'reinstate' => 'k2'], $this->fingerprintKeys());
+        self::assertSame(['k1', 'k2'], array_values(array_unique(array_column($this->journalRows(), 'key_id'))));
+    }
+
+    /**
+     * An erased owner's entry is still pruned past retention, and
+     * `audit-log:verify` then passes.
+     *
+     * @return void
+     */
+    public function testAnErasedOwnersEntryIsStillPrunedAndVerifyPasses(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.retention.after_days', 30);
+
+        CarbonImmutable::setTestNow(new CarbonImmutable('2026-11-01 10:00:00', 'UTC'));
+
+        $id = $this->recordSealedFor(self::customer());
+
+        CarbonImmutable::setTestNow(new CarbonImmutable(self::NOW, 'UTC'));
+
+        $this->seal();
+
+        self::assertSame(0, $this->command('audit-log:erase', [...self::CUSTOMER, ...self::OPERATOR])[0]);
+
+        $result = $this->jsonOf('audit-log:prune');
+
+        self::assertSame(['complete', 1], [$result['status'], $result['deleted']]);
+        self::assertSame([], $this->present([$id]));
+
+        $verified = $this->verify();
+
+        self::assertSame([0, ['pruned'], []], [$verified['exit'], $verified['segments'], $verified['findings']]);
+        self::assertMatchesRegularExpression('/^Keys: 1 verified, 1 erased, 0 findings\.$/m', $this->command('audit-log:verify')[1]);
+    }
+
+    /**
      * Store a captured record with the fields given over its own and return its
      * id.
      *
@@ -586,17 +671,23 @@ final class LifecycleProofsTest extends TestCase
      */
     private function recordUnder(string $category): void
     {
-        $catalogue = new EventCatalogue;
+        self::define(EventDefinition::for('invoice.approved')->category($category));
 
-        $catalogue->define(EventDefinition::for('invoice.approved')->category($category));
-
-        $recorder = new Recorder($catalogue, new ContributorRegistry);
-
-        app()->instance(EventCatalogue::class, $catalogue);
-        app()->instance(Recorder::class, $recorder);
-
-        AuditLog::swap($recorder);
         AuditLog::record('invoice.approved');
+    }
+
+    /**
+     * Record `invoice.approved` by the owner, its IBAN sealed under the owner's
+     * key, and return its id.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Records\Reference  $owner
+     * @return string
+     */
+    private function recordSealedFor(Reference $owner): string
+    {
+        self::define(EventDefinition::for('invoice.approved')->category('finance')->encrypt('iban', KeyOwner::ACTOR));
+
+        return AuditLog::event('invoice.approved')->by($owner)->withProperties(['iban' => 'GB29NWBK60161331926819'])->record()->id;
     }
 
     /**
@@ -806,6 +897,31 @@ final class LifecycleProofsTest extends TestCase
     }
 
     /**
+     * The `fingerprint_key` of the journal's erasure and reinstatement rows, by
+     * kind.
+     *
+     * @return array<string, ?string>
+     */
+    private function fingerprintKeys(): array
+    {
+        $keys = [];
+
+        foreach ($this->journalRows() as $stored) {
+            $row = JournalRow::fromRow($stored, true);
+
+            if (!in_array($row->kind, [JournalKind::ERASURE, JournalKind::REINSTATE], true)) {
+                continue;
+            }
+
+            $key = $row->payloadMap()['fingerprint_key'] ?? null;
+
+            $keys[$row->kind->value] = is_string($key) ? $key : null;
+        }
+
+        return $keys;
+    }
+
+    /**
      * The storage connection.
      *
      * @return \Illuminate\Database\Connection
@@ -813,5 +929,35 @@ final class LifecycleProofsTest extends TestCase
     private function storage(): Connection
     {
         return DB::connection(StorageConnection::name());
+    }
+
+    /**
+     * Make the definition the only one the recorder and the container know.
+     *
+     * @param  \SineMacula\Laravel\AuditLog\Definitions\EventDefinition  $definition
+     * @return void
+     */
+    private static function define(EventDefinition $definition): void
+    {
+        $catalogue = new EventCatalogue;
+
+        $catalogue->define($definition);
+
+        $recorder = new Recorder($catalogue, new ContributorRegistry);
+
+        app()->instance(EventCatalogue::class, $catalogue);
+        app()->instance(Recorder::class, $recorder);
+
+        AuditLog::swap($recorder);
+    }
+
+    /**
+     * The owner every erasure names.
+     *
+     * @return \SineMacula\Laravel\AuditLog\Records\Reference
+     */
+    private static function customer(): Reference
+    {
+        return Reference::of(self::CUSTOMER['type'], self::CUSTOMER['id']);
     }
 }

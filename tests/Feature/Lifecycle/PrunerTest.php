@@ -22,6 +22,7 @@ use SineMacula\Laravel\AuditLog\Contracts\PruneLedger;
 use SineMacula\Laravel\AuditLog\Contracts\RetentionPolicy;
 use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
+use SineMacula\Laravel\AuditLog\Database\InstallationMismatchException;
 use SineMacula\Laravel\AuditLog\Database\IntegrityProgress;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
 use SineMacula\Laravel\AuditLog\Database\LifecycleTables;
@@ -50,6 +51,7 @@ use SineMacula\Laravel\AuditLog\Records\RecordFinaliser;
 use SineMacula\Laravel\AuditLog\Records\Reference;
 use SineMacula\Laravel\AuditLog\Stores\DatabaseAuditStore;
 use SineMacula\Laravel\AuditLog\Stores\RowCodec;
+use Tests\Concerns\ConnectsSecondDatabases;
 use Tests\Concerns\InteractsWithOutbox;
 use Tests\Concerns\SealsEntries;
 use Tests\Concerns\WritesTheJournal;
@@ -73,7 +75,7 @@ use Tests\TestCase;
 #[CoversClass(PruneResult::class)]
 final class PrunerTest extends TestCase
 {
-    use InteractsWithOutbox, SealsEntries, WritesTheJournal;
+    use ConnectsSecondDatabases, InteractsWithOutbox, SealsEntries, WritesTheJournal;
 
     /** @var string When every run starts, unless a test moves the clock. */
     private const string NOW = '2026-12-15 15:00:00';
@@ -95,6 +97,9 @@ final class PrunerTest extends TestCase
 
     /** @var string The operation every hold and release is placed under. */
     private const string OPERATION = '01932b4e-9000-7000-8000-0000000000a1';
+
+    /** @var array<string, string> A ring of two signing keys, by id. */
+    private const array RING = ['k2025' => 'audit-log prune test key 2025 0123456789', 'k2026' => 'audit-log prune test key 2026 0123456789'];
 
     /** @var string The pattern of a run id: a lower-case UUID v7. */
     private const string RUN_ID = '/\A[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/';
@@ -208,6 +213,43 @@ final class PrunerTest extends TestCase
         self::assertSame([], $this->present([$security]));
         self::assertSame([$finance], $this->present([$finance]));
         self::assertSame(['pruned'], $this->verifiedSegments());
+    }
+
+    /**
+     * A per-tenant policy prunes each tenant by its own cut-off, and is asked
+     * of an entry of no tenant with none.
+     *
+     * @return void
+     */
+    public function testEachTenantIsPrunedByItsOwnRetention(): void
+    {
+        $this->usePolicy(static fn (string $category, ?Reference $tenant): int => match ($tenant?->id) {
+            'org_a' => 30,
+            'org_b' => 365,
+            null    => 90,
+            default => throw new \UnexpectedValueException('The policy was asked of an unknown tenant.'),
+        });
+
+        $orgA = $this->storeEntry(self::OLD, ['tenant_id' => 'org_a']);
+        $orgB = $this->storeEntry(self::OLD, ['tenant_id' => 'org_b']);
+        $none = $this->storeEntry(self::OLD, ['tenant_type' => null, 'tenant_id' => null]);
+
+        $this->sealAll();
+
+        $planned = app(Pruner::class)->run(true);
+        $result  = $this->prune();
+
+        self::assertSame([
+            'pairs' => [['category' => 'finance', 'tenant_type' => 'organisation', 'tenant_id' => 'org_a', 'cutoff' => self::CUTOFF, 'eligible' => 1]],
+            'seals' => [1 => 1],
+        ], $planned->plan);
+        self::assertSame([PruneStatus::COMPLETE, 1], [$result->status, $result->deleted]);
+        self::assertEqualsCanonicalizing([$orgB, $none], $this->present([$orgA, $orgB, $none]));
+        self::assertSame([
+            ['finance', 30, null, self::CUTOFF, 1],
+            ['finance', 365, null, '2025-12-15T00:00:00.000000Z', 1],
+            ['finance', 90, null, '2026-09-16T00:00:00.000000Z', 1],
+        ], $this->payloadsOf(JournalKind::PRUNE_RUN)[1]['decisions']);
     }
 
     /**
@@ -395,6 +437,29 @@ final class PrunerTest extends TestCase
     }
 
     /**
+     * A prune record signed under a newer ring key than its seal verifies as
+     * pruned.
+     *
+     * @return void
+     */
+    public function testAPruneUnderANewerKeyThanItsSealVerifies(): void
+    {
+        $this->useRing(self::RING, 'k2025');
+
+        $this->storeEntry(self::OLD);
+        $this->storeEntry(self::RECENT);
+        $this->sealAll();
+
+        $this->useRing(self::RING, 'k2026');
+
+        $result = $this->prune();
+
+        self::assertSame([PruneStatus::COMPLETE, 1], [$result->status, $result->deleted]);
+        self::assertSame(['k2025', 'k2026'], [$this->seals()[0]['key_id'], $this->records()[0]->keyId]);
+        self::assertSame(['pruned'], $this->verifiedSegments());
+    }
+
+    /**
      * The policy's row is written once per version.
      *
      * @return void
@@ -530,6 +595,28 @@ final class PrunerTest extends TestCase
 
         self::assertSame([PruneStatus::PARTIAL, 100, 0, 1], [$result->status, $result->deleted, $result->cursor, $result->remaining]);
         self::assertSame(['policy', 'prune_run', 'prune', 'prune_run'], $this->kinds());
+    }
+
+    /**
+     * A run given no budget takes `retention.max_seconds`.
+     *
+     * @return void
+     */
+    public function testTheConfiguredBudgetStopsARunGivenNone(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.retention.max_seconds', 60);
+
+        $first = $this->storeEntry(self::OLD);
+        $this->sealAll();
+        $second = $this->storeEntry(self::OLD);
+        $this->sealAll();
+
+        $this->moveClockOnTheFirstPruneRow('2026-12-15 15:01:01');
+
+        $result = $this->prune();
+
+        self::assertSame([PruneStatus::PARTIAL, 1, 1, 1], [$result->status, $result->deleted, $result->cursor, $result->remaining]);
+        self::assertSame([$second], $this->present([$first, $second]));
     }
 
     /**
@@ -1011,6 +1098,36 @@ final class PrunerTest extends TestCase
     }
 
     /**
+     * A run refuses connections that reach different installations, deleting
+     * and journalling nothing, while a dry run still plans.
+     *
+     * @return void
+     */
+    public function testARunRefusesAnotherInstallationAndADryRunStillPlans(): void
+    {
+        $id = $this->storeEntry(self::OLD);
+
+        $this->sealAll();
+        $this->anotherInstallation();
+
+        // The storage side is the odd one, so a dry run still reads the log
+        app(ConfigRepository::class)->set(['audit-log.storage.connection' => self::OTHER, 'audit-log.storage.maintenance_connection' => self::CONNECTION]);
+
+        $planned = app(Pruner::class)->run(true);
+        $refused = $this->prune();
+
+        app(ConfigRepository::class)->set(['audit-log.storage.connection' => null, 'audit-log.storage.maintenance_connection' => null]);
+
+        self::assertSame([PruneStatus::COMPLETE, [1 => 1]], [$planned->status, $planned->plan['seals'] ?? null]);
+        self::assertSame([PruneStatus::FAILED, 'prune_failed', false, 0], [$refused->status, $refused->failure, $refused->committed, $refused->deleted]);
+        self::assertSame([$id], $this->present([$id]));
+        self::assertSame([], $this->kinds());
+        $stopped = sprintf('The prune run `%s` stopped with %s; the chunks it committed stand.', $refused->operationId, InstallationMismatchException::class);
+
+        self::assertSame([$stopped], $this->reported());
+    }
+
+    /**
      * Unsealed entries are never deleted, since a run walks seals alone.
      *
      * @return void
@@ -1364,7 +1481,7 @@ final class PrunerTest extends TestCase
     /**
      * Bind a policy of version `custom:1` whose retention the closure gives.
      *
-     * @param  \Closure(string): ?int  $retain
+     * @param  \Closure(string, ?\SineMacula\Laravel\AuditLog\Records\Reference): ?int  $retain
      * @param  ?int  $preserve
      * @return void
      */
@@ -1374,12 +1491,12 @@ final class PrunerTest extends TestCase
             /**
              * Constructor.
              *
-             * @param  \Closure(string): ?int  $retain
+             * @param  \Closure(string, ?\SineMacula\Laravel\AuditLog\Records\Reference): ?int  $retain
              * @param  ?int  $preserve
              */
             public function __construct(
 
-                /** The retention of each category. */
+                /** The retention of each pair. */
                 private readonly \Closure $retain,
 
                 /** The preservation of every pair. */
@@ -1398,7 +1515,7 @@ final class PrunerTest extends TestCase
             }
 
             /**
-             * The closure's retention of the category.
+             * The closure's retention of the pair.
              *
              * @param  string  $category
              * @param  ?\SineMacula\Laravel\AuditLog\Records\Reference  $tenant
@@ -1407,7 +1524,7 @@ final class PrunerTest extends TestCase
             #[\Override]
             public function retainFor(string $category, ?Reference $tenant): ?int
             {
-                return ($this->retain)($category);
+                return ($this->retain)($category, $tenant);
             }
 
             /**
