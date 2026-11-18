@@ -332,6 +332,7 @@ final class EventCatalogueTest extends TestCase
             self::assertSame(sprintf('`%s::FIRST` defines another event code.', MisdefinedActivity::class), $exception->getMessage());
         }
 
+        self::assertFalse($catalogue->isRegistered(EventCode::of('app.valid')));
         self::assertFalse($catalogue->isRegistered(EventCode::of('app.first')));
         self::assertFalse($catalogue->isRegistered(EventCode::of('app.second')));
     }

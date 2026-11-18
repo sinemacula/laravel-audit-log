@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature\Console;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
@@ -12,11 +13,13 @@ use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\AuditLog\Console\ReplayCommand;
 use SineMacula\Laravel\AuditLog\Contracts\AuditStore;
+use SineMacula\Laravel\AuditLog\Database\InstallationMismatchException;
 use SineMacula\Laravel\AuditLog\Delivery\ReplayResult;
 use SineMacula\Laravel\AuditLog\Integrity\CanonicalEncoder;
 use SineMacula\Laravel\AuditLog\Records\FinalisedRecord;
 use SineMacula\Laravel\AuditLog\Stores\FailureSpill;
 use Symfony\Component\Console\Exception\InvalidOptionException;
+use Tests\Concerns\ConnectsSecondDatabases;
 use Tests\Concerns\InteractsWithAuditStore;
 use Tests\Concerns\InteractsWithOutbox;
 use Tests\Concerns\PrunesByHand;
@@ -40,7 +43,7 @@ use Tests\TestCase;
 #[CoversClass(ReplayResult::class)]
 final class ReplayCommandTest extends TestCase
 {
-    use InteractsWithAuditStore, InteractsWithOutbox, PrunesByHand, SealsEntries, SearchesForSecrets, SeedsTheOutbox;
+    use ConnectsSecondDatabases, InteractsWithAuditStore, InteractsWithOutbox, PrunesByHand, SealsEntries, SearchesForSecrets, SeedsTheOutbox;
 
     /** @var list<string> The files each test wrote. */
     private array $files = [];
@@ -414,6 +417,24 @@ final class ReplayCommandTest extends TestCase
 
         self::assertSame(1, $this->replay(['--outbox' => true]));
         self::assertSame("The outbox replay stopped with LogicException.\n", $this->printed());
+    }
+
+    /**
+     * A spill replay against another installation exits non-zero, naming only
+     * the refusal's class.
+     *
+     * @return void
+     */
+    public function testAnotherInstallationExitsNonZeroNamingOnlyTheClass(): void
+    {
+        $path = $this->file(self::lineOf($this->finalisedRecord()) . "\n");
+
+        $this->anotherInstallation();
+
+        app(ConfigRepository::class)->set('audit-log.storage.maintenance_connection', self::OTHER);
+
+        self::assertSame(1, $this->replay(['--spill' => $path]));
+        self::assertSame('The spill replay stopped with ' . InstallationMismatchException::class . ".\n", $this->printed());
     }
 
     /**
