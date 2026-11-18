@@ -268,6 +268,45 @@ final class RecorderTest extends TestCase
     }
 
     /**
+     * A failed fail-closed write uses up the builder, so a retry takes a fresh
+     * one under a new id.
+     *
+     * @return void
+     */
+    public function testAFailedFailClosedWriteUsesUpTheBuilder(): void
+    {
+        FakeAuditStore::failing(new \RuntimeException('The store is down.'));
+
+        $pending = AuditLog::event(self::CODE)->failClosed();
+        $failure = null;
+
+        try {
+            $pending->record();
+        } catch (\Throwable $exception) {
+            $failure = $exception;
+        }
+
+        self::assertInstanceOf(AuditWriteFailedException::class, $failure);
+
+        $failedId = $failure->recordId;
+
+        try {
+            $pending->record();
+
+            self::fail('Expected the used builder to be refused.');
+        } catch (\LogicException $exception) {
+            self::assertSame('A pending record is recorded once, and this one has already been recorded.', $exception->getMessage());
+        }
+
+        $fake   = AuditLog::fake();
+        $record = AuditLog::event(self::CODE)->failClosed()->record();
+
+        self::assertSame([$record], $fake->recorded());
+        self::assertNotNull($failedId);
+        self::assertNotSame($failedId, $record->id);
+    }
+
+    /**
      * Rows of `[call]`: each way of naming a code.
      *
      * @return iterable<string, array{0: \Closure(string): (\SineMacula\Laravel\AuditLog\Records\AuditRecord|\SineMacula\Laravel\AuditLog\Records\PendingRecord)}>
@@ -442,15 +481,19 @@ final class RecorderTest extends TestCase
     }
 
     /**
-     * A contributor's failure propagates, and nothing is stored.
+     * A contributor's failure propagates and stores nothing, and a retry of the
+     * builder writes once with what the defaults filled first.
      *
      * @return void
      */
-    public function testAThrowingContributorPropagates(): void
+    public function testAThrowingContributorPropagatesAndLeavesTheBuilderUsable(): void
     {
         $contributor = new class implements ContextContributor {
+            /** @var bool Whether the next contribution fails. */
+            public bool $fails = true;
+
             /**
-             * Fail.
+             * Fail while told to.
              *
              * @param  \SineMacula\Laravel\AuditLog\Records\Contribution  $contribution
              * @return void
@@ -460,23 +503,41 @@ final class RecorderTest extends TestCase
             #[\Override]
             public function contribute(Contribution $contribution): void
             {
-                throw new \RuntimeException('The contributor failed.');
+                if ($this->fails) {
+                    throw new \RuntimeException('The contributor failed.');
+                }
             }
         };
+
+        $this->app?->instance($contributor::class, $contributor);
 
         $recorder = self::recorder();
 
         $recorder->contribute($contributor::class);
 
+        Auth::guard('web')->setUser((new StubAuthUser)->forceFill(['id' => 42]));
+
+        $pending = $recorder->event(self::CODE);
+
         try {
-            $recorder->record(self::CODE);
+            $pending->record();
 
             self::fail('Expected the contributor\'s failure to propagate.');
         } catch (\RuntimeException $exception) {
             self::assertSame('The contributor failed.', $exception->getMessage());
         }
 
+        self::assertFalse($pending->isConsumed());
         self::assertSame(0, $this->fake->count());
+
+        $contributor->fails = false;
+
+        Auth::guard('web')->setUser((new StubAuthUser)->forceFill(['id' => 7]));
+
+        $record = $pending->record();
+
+        self::assertSame([$record], $this->fake->recorded());
+        self::assertSame('42', $record->actorId);
     }
 
     /**
