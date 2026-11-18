@@ -132,8 +132,9 @@ none of this promises is in `threat-model.md`.
   written after a seal row is inserted are its four anchor columns: `anchor`, `anchor_receipt`, `anchored_at` and
   `anchor_error_class`.
 - A caught failure is named by its class alone: `audit-log:seal` and `audit-log:verify` print, dispatch and report no
-  message, statement, binding or value of an entry, and the exceptions the package raises for integrity have no previous
-  exception.
+  message, statement, binding or value of an entry. The integrity exception classes have no previous exception; the
+  canonical encoder's refusal of a string that is not valid UTF-8 keeps the `JsonException`, whose message holds no
+  value.
 
 ## Success Path
 
