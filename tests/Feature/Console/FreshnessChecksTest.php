@@ -329,8 +329,7 @@ final class FreshnessChecksTest extends TestCase
     }
 
     /**
-     * A prune that never ran is a problem once the log is old, unless it is
-     * not scheduled.
+     * A never-run prune is a problem once the log is old, unless unscheduled.
      *
      * @return void
      */
@@ -569,7 +568,9 @@ final class FreshnessChecksTest extends TestCase
         $this->storeEntries(2, self::stored(3600));
 
         self::assertSame(0, $this->runAt('audit-log:seal', 600));
+        self::assertContains('[freshness] sealing: ok (age 600s, limit 1800s)', $this->freshness()[1]);
         self::assertSame(0, $this->runAt('audit-log:seal', 480, ['--sweep' => true]));
+        self::assertContains('[freshness] sweep: ok (age 480s, limit 93600s)', $this->freshness()[1]);
         self::assertSame(0, $this->runAt('audit-log:prune', 360));
         self::assertSame(0, $this->runAt('audit-log:verify', 240, ['--strict' => true, '--sweep-first' => true]));
 
