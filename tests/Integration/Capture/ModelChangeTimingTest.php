@@ -345,7 +345,9 @@ final class ModelChangeTimingTest extends TestCase
         $deadlock   = new QueryException(self::CONNECTION, 'insert into outbox values (?)', ['INV-1'], new \PDOException(self::DEADLOCK));
         $insert     = '/^insert into \S*' . preg_quote(DeliveryTables::outboxTable(), '/') . '/';
         $pending    = true;
-        $thrown     = [];
+
+        /** @var list<\Throwable> $thrown */
+        $thrown = [];
 
         $connection->beforeExecuting(static function (string $query) use ($deadlock, $insert, &$pending): void {
             if ($pending && preg_match($insert, $query) === 1) {
@@ -371,7 +373,8 @@ final class ModelChangeTimingTest extends TestCase
         self::assertNull($thrown[0]->getPrevious());
         self::assertSame([], $this->spillLines());
         self::assertSame([], $this->reporter->reports());
-        self::assertSame([[WatchedInvoice::class, RecordModelChange::class]], array_map(static fn (AuditCaptureFailed $failure): array => [$failure->eventClass, $failure->mapperClass], $this->failures));
+        self::assertCount(1, $this->failures);
+        self::assertSame([WatchedInvoice::class, RecordModelChange::class], [$this->failures[0]->eventClass, $this->failures[0]->mapperClass]);
         self::assertSame(1, $connection->table(WatchedInvoice::TABLE)->count());
         self::assertSame(1, $this->outboxCount());
 

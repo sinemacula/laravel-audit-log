@@ -566,8 +566,7 @@ final class MappedEventsTest extends TestCase
     }
 
     /**
-     * Map the portal interface to the package code mapper while the
-     * application boots.
+     * Map the portal interface to the package code mapper while booting.
      *
      * @param  \Illuminate\Foundation\Application  $app
      * @return void

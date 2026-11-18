@@ -249,8 +249,8 @@ final class ModelChangesTest extends TestCase
      */
     public function testAWatchedPivotModelRecordsAttachAndDetach(): void
     {
-        $tagged  = TaggedInvoice::query()->create(['number' => 'TAG-1']);
-        $tag     = Tag::query()->create(['name' => 'urgent']);
+        $tagged  = TaggedInvoice::query()->create(['id' => 7, 'number' => 'TAG-1']);
+        $tag     = Tag::query()->create(['id' => 9, 'name' => 'urgent']);
         $written = count($this->entries());
 
         $tagged->linkedTags()->attach($tag->id);
