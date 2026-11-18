@@ -2067,6 +2067,48 @@ final class SegmentVerifierTest extends TestCase
     }
 
     /**
+     * Rows of `[the fields that hold the entry's only envelope]`.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @return iterable<string, array{0: array<string, mixed>}>
+     *
+     * @throws \JsonException
+     */
+    public static function provideEnvelopesOutsideTheProperties(): iterable
+    {
+        yield from [
+            'the ip'      => [['ip' => json_encode(self::envelope(self::KEY_ID), JSON_THROW_ON_ERROR)]],
+            'the context' => [['context' => ['route' => 'invoices.approve', 'payment' => ['card' => self::envelope(self::KEY_ID)]]]],
+        ];
+    }
+
+    /**
+     * An envelope in the IP address or the context is checked for its key use
+     * as one in the properties is.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<string, mixed>  $fields
+     * @return void
+     */
+    #[DataProvider('provideEnvelopesOutsideTheProperties')]
+    public function testAnEnvelopeOutsideThePropertiesWithoutItsKeyUseIsMissing(array $fields): void
+    {
+        $entryId = $this->storeEntryWith($fields, '2026-11-01T12:00:00.000000Z');
+
+        $this->sealAll();
+
+        self::assertSame(1, $this->keyUses()->where('entry_id', $entryId)->delete());
+
+        $report = $this->report(1);
+
+        self::assertSame(IntegrityStatus::TAMPERED, $report->integrity);
+        self::assertSame(Finding::KEY_USE_MISSING, $report->finding);
+        self::assertSame($entryId, $report->firstBadId);
+    }
+
+    /**
      * Key uses are asked for only of verified entries: one failing its HMAC is
      * reported for that, and no key use is read.
      *
@@ -2178,12 +2220,38 @@ final class SegmentVerifierTest extends TestCase
      */
     private function storeEnvelopeEntry(string $keyId, string $at): string
     {
+        return $this->storeEntryWith(['properties' => ['card' => self::envelope($keyId)]], $at);
+    }
+
+    /**
+     * Store an entry at the instant with the fields given, with its key uses,
+     * and return its id.
+     *
+     * @phpcsSuppress SlevomatCodingStandard.TypeHints.DisallowMixedTypeHint
+     *
+     * @param  array<string, mixed>  $fields
+     * @param  string  $at
+     * @return string
+     */
+    private function storeEntryWith(array $fields, string $at): string
+    {
         $finaliser = new RecordFinaliser(FrozenClock::at($at), app(RecordSigner::class));
-        $record    = $finaliser->finalise(RecordFactory::captured(['card' => ['v' => 1, 'k' => $keyId, 'c' => self::CIPHERTEXT]], occurredAt: $at));
+        $record    = $finaliser->finalise(RecordFactory::withFields($fields, RecordFactory::captured(occurredAt: $at)));
 
         app(DatabaseAuditStore::class)->store($record);
 
         return $record->record->id;
+    }
+
+    /**
+     * An envelope naming the key.
+     *
+     * @param  string  $keyId
+     * @return array{v: int, k: string, c: string}
+     */
+    private static function envelope(string $keyId): array
+    {
+        return ['v' => 1, 'k' => $keyId, 'c' => self::CIPHERTEXT];
     }
 
     /**

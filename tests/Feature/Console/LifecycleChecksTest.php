@@ -620,15 +620,22 @@ final class LifecycleChecksTest extends TestCase
     }
 
     /**
-     * A batch that last moved exactly an hour ago is not yet stale.
+     * A running batch is stale only once it last moved more than an hour ago.
      *
      * @return void
      */
-    public function testABatchThatMovedAnHourAgoIsNotYetStale(): void
+    public function testABatchIsStaleOnlyPastAnHour(): void
     {
         DB::table('audit_log_import_batches')->insert(self::batchRow('01932b4e-b000-7000-8000-000000000001', 'running', '2026-11-02 08:00:00.123456'));
 
         self::assertSame([], $this->checks()->notes());
+
+        CarbonImmutable::setTestNow(new CarbonImmutable('2026-11-02 09:00:00.123457', 'UTC'));
+
+        self::assertSame(
+            ['1 import batch is running with nothing written for over an hour: `01932b4e-b000-7000-8000-000000000001`' . self::STALE_NOTE],
+            $this->checks()->notes(),
+        );
     }
 
     /**

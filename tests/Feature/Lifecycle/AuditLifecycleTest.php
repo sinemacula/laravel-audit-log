@@ -32,6 +32,7 @@ use SineMacula\Laravel\AuditLog\Facades\AuditLog;
 use SineMacula\Laravel\AuditLog\Integrity\Enums\JournalKind;
 use SineMacula\Laravel\AuditLog\Integrity\OwnerFingerprint;
 use SineMacula\Laravel\AuditLog\Keys\KeyUseRebuilder;
+use SineMacula\Laravel\AuditLog\Lifecycle\AuditImporter;
 use SineMacula\Laravel\AuditLog\Lifecycle\AuditLifecycle;
 use SineMacula\Laravel\AuditLog\Lifecycle\Authority;
 use SineMacula\Laravel\AuditLog\Lifecycle\ConfiguredRetentionPolicy;
@@ -580,6 +581,31 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
+     * An import failing in a later chunk is recorded with the counts of the
+     * chunks before it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnImportFailingInALaterChunkIsRecordedWithTheEarlierCounts(): void
+    {
+        $this->failTheSecondChunk();
+
+        try {
+            $this->lifecycle()->import(ImportSource::fromFile($this->file(self::lines()), self::SOURCE), self::authority());
+
+            self::fail('Expected the second chunk to fail.');
+        } catch (\RuntimeException $exception) {
+            self::assertSame('The second chunk could not be written.', $exception->getMessage());
+        }
+
+        $properties = self::propertiesOf($this->readRecords('audit_log.imported')[0]);
+
+        self::assertSame(['failed', 150, 100], [$properties['status'] ?? null, $properties['lines_read'] ?? null, $properties['imported'] ?? null]);
+    }
+
+    /**
      * An import refused before its start records nothing and is rethrown.
      *
      * @return void
@@ -632,6 +658,61 @@ final class AuditLifecycleTest extends TestCase
             'authority_reason' => 'case.review',
             'outcome'          => 'failure',
         ], self::propertiesOf($record));
+    }
+
+    /**
+     * Closing a crashed held import reports its hold, which keeps the imported
+     * entries from a prune until it is released.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testClosingACrashedHeldImportKeepsItsHold(): void
+    {
+        $crashing = true;
+
+        $this->failTheSecondChunk();
+
+        DB::listen(static function (QueryExecuted $query) use (&$crashing): void {
+            if ($crashing && str_starts_with(strtolower($query->sql), 'insert') && in_array(JournalKind::IMPORT_FINISHED->value, $query->bindings, true)) {
+                $crashing = false;
+
+                throw new \RuntimeException('The journal could not be written.');
+            }
+        });
+
+        try {
+            app(AuditImporter::class)->import(ImportSource::fromFile($this->file(self::lines('2026-10-01T09:00:00.000001Z')), self::SOURCE), self::authority(), hold: true);
+
+            self::fail('Expected the import to crash.');
+        } catch (\RuntimeException $exception) {
+            self::assertSame('The second chunk could not be written.', $exception->getMessage());
+        }
+
+        $batch   = (array) DB::connection(StorageConnection::name())->table(LifecycleTables::importBatchesTable())->first();
+        $holdId  = $batch['hold_id'];
+        $entries = static fn (): int => DB::connection(StorageConnection::name())->table(EntrySettings::table())->where('import_batch_id', $batch['id'])->count();
+
+        self::assertSame('running', $batch['status']);
+        self::assertIsString($holdId);
+
+        $closed = $this->lifecycle()->closeImport((string) $batch['id'], self::authority());
+        $record = self::propertiesOf($this->readRecords('audit_log.imported')[0]);
+
+        self::assertSame([ImportStatus::INTERRUPTED, $holdId, 100], [$closed->status, $closed->holdId, $closed->imported]);
+        self::assertSame([$holdId, 100, 100], [$record['hold_id'] ?? null, $record['lines_read'] ?? null, $record['imported'] ?? null]);
+        self::assertSame([$holdId], array_map(static fn (Hold $hold): string => $hold->id, $this->lifecycle()->holds()));
+
+        $this->sealAll();
+        $this->lifecycle()->prune();
+
+        self::assertSame(100, $entries());
+
+        $this->lifecycle()->release($holdId, self::authority());
+        $this->lifecycle()->prune();
+
+        self::assertSame(0, $entries());
     }
 
     /**
@@ -1321,23 +1402,52 @@ final class AuditLifecycleTest extends TestCase
     }
 
     /**
-     * A line of the import format, of the record id given.
+     * A line of the import format, of the record id and time given.
      *
      * @param  string  $recordId
+     * @param  string  $occurredAt
      * @return string
      */
-    private static function line(string $recordId): string
+    private static function line(string $recordId, string $occurredAt = '2026-12-01T09:00:00.000001Z'): string
     {
         return (string) json_encode([
             'format'           => 'audit-log-import/v1',
             'source_record_id' => $recordId,
-            'occurred_at'      => '2026-12-01T09:00:00.000001Z',
+            'occurred_at'      => $occurredAt,
             'event'            => 'invoice.approved',
             'outcome'          => 'success',
             'actor'            => ['type' => 'user', 'id' => '42'],
             'category'         => 'finance',
             'properties'       => ['amount' => '1200.00'],
         ]);
+    }
+
+    /**
+     * 150 lines of the import format, `rec-000` to `rec-149`, occurring at the
+     * time given.
+     *
+     * @param  string  $occurredAt
+     * @return list<string>
+     */
+    private static function lines(string $occurredAt = '2026-12-01T09:00:00.000001Z'): array
+    {
+        return array_map(static fn (int $line): string => self::line(sprintf('rec-%03d', $line), $occurredAt), range(0, 149));
+    }
+
+    /**
+     * Import in chunks of 100 and fail the entries insert of the second.
+     *
+     * @return void
+     */
+    private function failTheSecondChunk(): void
+    {
+        app(ConfigRepository::class)->set('audit-log.import.chunk', 100);
+
+        DB::listen(static function (QueryExecuted $query): void {
+            if (str_starts_with(strtolower($query->sql), 'insert') && str_contains($query->sql, EntrySettings::table()) && in_array('rec-100', $query->bindings, true)) {
+                throw new \RuntimeException('The second chunk could not be written.');
+            }
+        });
     }
 
     /**
