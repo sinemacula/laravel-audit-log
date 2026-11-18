@@ -260,7 +260,7 @@ final class PrivacyProofsTest extends TestCase
         $keys       = $this->keysOf(new KeyUnit($owner, null, 'billing'));
 
         self::assertArrayNotHasKey('card', $properties);
-        self::assertSame([['card'], self::IBAN], [$properties['_audit']['omitted']['paths'] ?? null, $properties['iban'] ?? null]);
+        self::assertSame([['count' => 1, 'paths' => ['card']], self::IBAN], [$properties['_audit']['omitted'] ?? null, $properties['iban'] ?? null]);
         self::assertSame([[1, KeyState::SUPERSEDED]], array_map(static fn (SubjectKeyRow $key): array => [$key->generation, $key->state], $keys));
 
         $this->assertVerifies();
@@ -387,8 +387,9 @@ final class PrivacyProofsTest extends TestCase
 
         $after = app(KeyWrapper::class)->currentKeyId();
 
-        self::assertNotSame($before, $after);
+        self::assertStringStartsWith('d-', $before);
         self::assertStringStartsWith('d-', $after);
+        self::assertNotSame($before, $after);
         self::assertSame([$before], $this->wrapKeyIds());
 
         $this->revealEverything();
@@ -402,8 +403,7 @@ final class PrivacyProofsTest extends TestCase
     }
 
     /**
-     * An owned note and an encrypted address reveal; erasing the note's owner
-     * erases the note alone.
+     * An owned note and an encrypted address reveal; only the note is erased.
      *
      * @return void
      */
@@ -419,6 +419,10 @@ final class PrivacyProofsTest extends TestCase
         $id = $pending->record()->id;
 
         $this->later();
+        $this->allowEverything();
+
+        self::assertSame([self::ENCRYPTED, self::ENCRYPTED], $this->noteAndAddressOf($id));
+
         $this->revealEverything();
 
         self::assertSame([self::NOTE, self::ADDRESS], $this->noteAndAddressOf($id));
@@ -520,13 +524,16 @@ final class PrivacyProofsTest extends TestCase
      * The note and the address of the entry, as a page shows them.
      *
      * @param  string  $id
-     * @return array{0: mixed, 1: ?string}
+     * @return array{0: string, 1: ?string}
      */
     private function noteAndAddressOf(string $id): array
     {
         $entry = $this->shown($id);
+        $note  = $entry->properties['_audit']['note'] ?? null;
 
-        return [$entry->properties['_audit']['note'] ?? null, $entry->ip];
+        self::assertIsString($note);
+
+        return [$note, $entry->ip];
     }
 
     /**

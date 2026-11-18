@@ -199,7 +199,11 @@ final class SubjectKeyFieldReaderTest extends TestCase
 
         self::assertSame(['4242'], $this->displays([$field]));
 
-        $this->keyConnection()->table(KeyTables::subjectKeysTable())->where('id', $key->id)->update(['state' => KeyState::ERASED->value, 'wrapped_key' => null, 'erasure_id' => self::UNKNOWN_ID]);
+        $this->keyConnection()->table(KeyTables::subjectKeysTable())->where('id', $key->id)->update([
+            'state'       => KeyState::ERASED->value,
+            'wrapped_key' => null,
+            'erasure_id'  => self::UNKNOWN_ID,
+        ]);
 
         self::assertSame([self::UNREADABLE], $this->displays([$field]));
     }
