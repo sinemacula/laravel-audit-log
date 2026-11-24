@@ -120,7 +120,9 @@ trail is read is in `reading.md`; how an erasure is journalled is in `lifecycle.
   `privacy.current`. `audit-log:check` compares the `wrap_key_id` of every live and superseded key with the ring's ids,
   unwrapping nothing, and reports a key wrapped under a key the ring does not hold. The derivation gives domain
   separation, not independence from `app.key`: anyone holding `app.key` holds the derived wrapping keys too, and a
-  wrapping key that must outlive or outlast `app.key` belongs in `privacy.keys`.
+  wrapping key that must outlive or outlast `app.key` belongs in `privacy.keys`. With `require_explicit_keys` on, an
+  empty `privacy.keys` fails closed instead of deriving a wrapping key; an explicit ring still keeps the derived keys to
+  unwrap.
 - A key is created the first time a record needs it, on `Keys\KeySession`: a connection of its own to the storage
   connection's writer, built from that connection's resolved configuration and purged after the creation, so a key
   commits on its own and never disappears with a host transaction that rolls back while a spill, the outbox or an

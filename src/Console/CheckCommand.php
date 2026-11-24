@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\AuditLog\Console;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Console\Command;
 use Illuminate\Database\DatabaseManager;
+use SineMacula\Laravel\AuditLog\Config\ExplicitKeys;
 use SineMacula\Laravel\AuditLog\Database\DeliveryTables;
 use SineMacula\Laravel\AuditLog\Database\EntrySettings;
 use SineMacula\Laravel\AuditLog\Database\IntegrityTables;
@@ -235,7 +236,7 @@ final class CheckCommand extends Command
 
     /**
      * The checks of the integrity settings, one each; the application keys are
-     * read only when no ring is set.
+     * read only when no ring is set and explicit keys are not required.
      *
      * @param  \Illuminate\Config\Repository  $config
      * @return list<\Closure(): list<string>>
@@ -249,7 +250,8 @@ final class CheckCommand extends Command
         return [
             self::reading($integrity->currentKeyId(...)),
             self::reading($integrity->explicitKeys(...)),
-            self::reading(static fn (): array => $integrity->explicitKeys() === [] ? $integrity->applicationKeys() : []),
+            self::reading(static fn (): bool => ExplicitKeys::required($config)),
+            self::reading(static fn (): array => $integrity->explicitKeys() === [] && !ExplicitKeys::required($config) ? $integrity->applicationKeys() : []),
             self::reading($seals->logId(...)),
             self::reading(IntegrityTables::checkpointsTable(...)),
             self::reading(IntegrityTables::membersTable(...)),
@@ -331,8 +333,8 @@ final class CheckCommand extends Command
             self::reading($redaction->explicitKey(...)),
             // Without an integrity ring the integrity checks already read
             // `app.key`, so it is listed once
-            static function () use ($redaction, $integrity): array {
-                if ($integrity->explicitKeys() !== []) {
+            static function () use ($config, $redaction, $integrity): array {
+                if (ExplicitKeys::required($config) || $integrity->explicitKeys() !== []) {
                     $redaction->rootKey();
                 }
 

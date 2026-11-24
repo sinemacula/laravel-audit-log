@@ -33,7 +33,8 @@ none of this promises is in `threat-model.md`.
 - With `integrity.keys` empty, the key is derived from `app.key`: a `base64:` key is decoded to bytes first, then
   HKDF-SHA256 with the info `sinemacula/audit-log:integrity:v1` gives the 32-byte secret. Its id is a fingerprint,
   `d` followed by the first 16 hex characters of the HMAC-SHA256 of `audit-log:key-id` under the secret, so a rotated
-  `app.key` gets a new id. Keys derived from `app.previous_keys` in the same way verify only, never sign.
+  `app.key` gets a new id. Keys derived from `app.previous_keys` in the same way verify only, never sign. With
+  `require_explicit_keys` on, an empty `integrity.keys` fails closed instead.
 - With `integrity.keys` set, the ring is exactly those keys, and `integrity.current` names the one that signs. Each id
   is 1 to 32 letters, digits, dots, underscores or hyphens starting with a letter or a digit, so it fits `key_id`;
   each secret, once decoded (`base64:` strictly), is at least 32 bytes and is the HMAC key itself. A malformed ring

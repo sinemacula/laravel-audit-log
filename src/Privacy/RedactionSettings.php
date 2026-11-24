@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Privacy;
 
 use Illuminate\Contracts\Config\Repository;
+use SineMacula\Laravel\AuditLog\Config\ExplicitKeys;
 use SineMacula\Laravel\AuditLog\Config\IntegerSetting;
 use SineMacula\Laravel\AuditLog\Config\SecretSetting;
 use SineMacula\Laravel\AuditLog\Privacy\Enums\IdentifierMode;
@@ -101,8 +102,9 @@ final readonly class RedactionSettings
     }
 
     /**
-     * The root secret every hash derives from: the explicit key, else
-     * `app.key`; a malformed explicit key never falls back.
+     * The root secret every hash derives from: the explicit key, else `app.key`
+     * unless explicit keys are required; a malformed explicit key never falls
+     * back.
      *
      * @return string
      *
@@ -110,7 +112,18 @@ final readonly class RedactionSettings
      */
     public function rootKey(): string
     {
-        return $this->explicitKey() ?? $this->applicationKey();
+        $key      = $this->explicitKey();
+        $required = ExplicitKeys::required($this->config);
+
+        if ($key !== null) {
+            return $key;
+        }
+
+        if ($required) {
+            throw new \InvalidArgumentException(ExplicitKeys::missing(self::PREFIX . 'key'));
+        }
+
+        return $this->applicationKey();
     }
 
     /**

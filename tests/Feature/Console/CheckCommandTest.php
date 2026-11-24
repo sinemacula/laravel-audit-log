@@ -159,6 +159,7 @@ final class CheckCommandTest extends TestCase
         'storage.maintenance_connection'            => 123,
         'entries.table'                             => 'audit-log',
         'entries.artifacts_table'                   => 'audit-artifacts',
+        'require_explicit_keys'                     => 'yes',
         'integrity.keys'                            => 'x',
         'integrity.current'                         => 'k1',
         'actor.guards'                              => 'web',
@@ -517,6 +518,7 @@ final class CheckCommandTest extends TestCase
             'a header name that is not a string'       => [['audit-log.context.request_id_header' => 42], self::MALFORMED_HEADER],
             'an empty header name'                     => [['audit-log.context.request_id_header' => ''], self::MALFORMED_HEADER],
             'a header name of 65 characters'           => [['audit-log.context.request_id_header' => str_repeat('h', 65)], self::MALFORMED_HEADER],
+            'a required keys flag that is a word'      => [['audit-log.require_explicit_keys' => 'yes'], '[config] `audit-log.require_explicit_keys` must be true or false.'],
             'a registered flag that is a digit'        => [['audit-log.definitions.require_registered' => '1'], self::MALFORMED_REQUIRE_REGISTERED],
             'a registered flag that is a word'         => [['audit-log.definitions.require_registered' => 'yes'], self::MALFORMED_REQUIRE_REGISTERED],
             'a registered flag that is a number'       => [['audit-log.definitions.require_registered' => 1], self::MALFORMED_REQUIRE_REGISTERED],
@@ -1319,6 +1321,88 @@ final class CheckCommandTest extends TestCase
         $config->set('audit-log.integrity.current', 'k1');
 
         self::assertCount(2, self::problemsIn($this->check()[1]));
+    }
+
+    /**
+     * With explicit keys required, each empty key is listed and no `app.key`
+     * problem is, whatever `app.key` holds.
+     *
+     * @return void
+     */
+    public function testRequiredExplicitKeysListEachEmptyKey(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('audit-log.require_explicit_keys', true);
+
+        $expected = [
+            '[config] `audit-log.integrity.keys` must be set while `audit-log.require_explicit_keys` is on.',
+            '[config] `audit-log.redaction.key` must be set while `audit-log.require_explicit_keys` is on.',
+            '[config] `audit-log.privacy.keys` must be set while `audit-log.require_explicit_keys` is on.',
+        ];
+
+        self::assertEqualsCanonicalizing($expected, self::problemsIn($this->check()[1]));
+
+        $config->set('app.key', '');
+
+        self::assertEqualsCanonicalizing($expected, self::problemsIn($this->check()[1]));
+    }
+
+    /**
+     * With explicit keys required, a malformed integrity ring does not hide an
+     * empty redaction key.
+     *
+     * @return void
+     */
+    public function testRequiredExplicitKeysListAnEmptyRedactionKeyBesideAMalformedRing(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('audit-log.require_explicit_keys', true);
+        $config->set('audit-log.integrity.keys', 'x');
+
+        self::assertContains('[config] `audit-log.redaction.key` must be set while `audit-log.require_explicit_keys` is on.', self::problemsIn($this->check()[1]));
+    }
+
+    /**
+     * With explicit keys required and all three set, nothing is listed, even
+     * without an `app.key`.
+     *
+     * @return void
+     */
+    public function testRequiredExplicitKeysPassWhenAllAreSet(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        foreach ([...self::RING, ...self::WRAPPING_RING, 'audit-log.redaction.key' => str_repeat('r', 32), 'audit-log.require_explicit_keys' => true] as $key => $value) {
+            $config->set($key, $value);
+        }
+
+        [$code, $output] = $this->check();
+
+        self::assertSame([], self::problemsIn($output));
+        self::assertSame(0, $code);
+    }
+
+    /**
+     * A malformed flag is listed once, beside explicit keys that never read it
+     * as well as beside empty ones.
+     *
+     * @return void
+     */
+    public function testAMalformedRequireExplicitKeysIsListedOnce(): void
+    {
+        $config = app(ConfigRepository::class);
+
+        $config->set('audit-log.require_explicit_keys', 'yes');
+
+        self::assertSame(['[config] `audit-log.require_explicit_keys` must be true or false.'], self::problemsIn($this->check()[1]));
+
+        foreach ([...self::RING, ...self::WRAPPING_RING, 'audit-log.redaction.key' => str_repeat('r', 32)] as $key => $value) {
+            $config->set($key, $value);
+        }
+
+        self::assertSame(['[config] `audit-log.require_explicit_keys` must be true or false.'], self::problemsIn($this->check()[1]));
     }
 
     /**

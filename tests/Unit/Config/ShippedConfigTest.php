@@ -144,6 +144,9 @@ final class ShippedConfigTest extends TestCase
     /** @var string Env var refusing a code with no registered definition. */
     private const string REQUIRE_REGISTERED_ENV = 'AUDIT_LOG_DEFINITIONS_REQUIRE_REGISTERED';
 
+    /** @var string Env var for whether every key must be set explicitly. */
+    private const string REQUIRE_EXPLICIT_KEYS_ENV = 'AUDIT_LOG_REQUIRE_EXPLICIT_KEYS';
+
     /** @var string Env var naming the credential a failed sign-in is read for. */
     private const string IDENTIFIER_KEY_ENV = 'AUDIT_LOG_CAPTURE_LARAVEL_IDENTIFIER_KEY';
 
@@ -276,6 +279,7 @@ final class ShippedConfigTest extends TestCase
         self::REQUEST_ID_HEADER_ENV,
         self::TRUST_TRACEPARENT_ENV,
         self::REQUIRE_REGISTERED_ENV,
+        self::REQUIRE_EXPLICIT_KEYS_ENV,
         self::IDENTIFIER_KEY_ENV,
         self::GATE_ENABLED_ENV,
         self::BULK_MAX_MEMBERS_ENV,
@@ -929,6 +933,30 @@ final class ShippedConfigTest extends TestCase
     }
 
     /**
+     * With nothing in the environment keys may derive from `app.key`.
+     *
+     * @return void
+     */
+    public function testRequireExplicitKeysDefaultsToOff(): void
+    {
+        putenv(self::REQUIRE_EXPLICIT_KEYS_ENV);
+
+        self::assertFalse($this->config()['require_explicit_keys']);
+    }
+
+    /**
+     * Requiring explicit keys is read from its env var.
+     *
+     * @return void
+     */
+    public function testRequireExplicitKeysIsReadFromTheEnvironment(): void
+    {
+        putenv(self::REQUIRE_EXPLICIT_KEYS_ENV . '=true');
+
+        self::assertTrue($this->config()['require_explicit_keys']);
+    }
+
+    /**
      * With nothing in the environment a code needs no registered definition.
      *
      * @return void
@@ -1126,6 +1154,7 @@ final class ShippedConfigTest extends TestCase
             'storage.maintenance_connection',
             'entries.table',
             'entries.artifacts_table',
+            'require_explicit_keys',
             'integrity.keys',
             'integrity.current',
             'integrity.log_id',
@@ -1650,7 +1679,7 @@ final class ShippedConfigTest extends TestCase
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
-     * @return array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string, artifacts_table: string}, integrity: array{keys: array<string, string>, current: ?string, log_id: ?string, checkpoints_table: string, members_table: string, state_table: string, seal: array{schedule: ?string, sweep_schedule: ?string, batch: int|string, max_batches: int|string, lookback_seconds: int|string, settle_seconds: int|string, max_attempts: int|string}, verify: array{schedule: ?string, max_unsealed_age_seconds: int|string}, anchor: array{driver: ?string, disk: ?string, path: string, batch: int|string}}, lifecycle: array{journal_table: string, holds_table: string, lock_table: string}, retention: array{after_days: int|string, categories: array<string, int|string>, preserve: array<string, int|string>, batch: int|string, max_seconds: int|string, schedule: ?string}, import: array{batches_table: string, chunk: int|string, max_skew_seconds: int|string, max_line_bytes: int|string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, capture: array{laravel: array{except_guards: list<string>, identifier_key: string}, gate: array{enabled: bool|string, only_abilities: ?list<string>, except_abilities: list<string>, reason_codes: list<string>}, bulk: array{max_members: int|string, max_bytes: int|string}}, read: array{max_per_page: int|string}, export: array{chunk: int|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, privacy: array{keys: array<string, string>, current: ?string, subject_keys_table: string, owner_erasures_table: string, key_uses_table: string, rewrap_batch: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}, monitor: array{seal_minutes: int|string, daily_minutes: int|string, outbox_minutes: int|string}}
+     * @return array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string, artifacts_table: string}, require_explicit_keys: bool|string, integrity: array{keys: array<string, string>, current: ?string, log_id: ?string, checkpoints_table: string, members_table: string, state_table: string, seal: array{schedule: ?string, sweep_schedule: ?string, batch: int|string, max_batches: int|string, lookback_seconds: int|string, settle_seconds: int|string, max_attempts: int|string}, verify: array{schedule: ?string, max_unsealed_age_seconds: int|string}, anchor: array{driver: ?string, disk: ?string, path: string, batch: int|string}}, lifecycle: array{journal_table: string, holds_table: string, lock_table: string}, retention: array{after_days: int|string, categories: array<string, int|string>, preserve: array<string, int|string>, batch: int|string, max_seconds: int|string, schedule: ?string}, import: array{batches_table: string, chunk: int|string, max_skew_seconds: int|string, max_line_bytes: int|string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, capture: array{laravel: array{except_guards: list<string>, identifier_key: string}, gate: array{enabled: bool|string, only_abilities: ?list<string>, except_abilities: list<string>, reason_codes: list<string>}, bulk: array{max_members: int|string, max_bytes: int|string}}, read: array{max_per_page: int|string}, export: array{chunk: int|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, privacy: array{keys: array<string, string>, current: ?string, subject_keys_table: string, owner_erasures_table: string, key_uses_table: string, rewrap_batch: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}, monitor: array{seal_minutes: int|string, daily_minutes: int|string, outbox_minutes: int|string}}
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      *
@@ -1658,7 +1687,7 @@ final class ShippedConfigTest extends TestCase
      */
     private function config(): array
     {
-        /** @var array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string, artifacts_table: string}, integrity: array{keys: array<string, string>, current: ?string, log_id: ?string, checkpoints_table: string, members_table: string, state_table: string, seal: array{schedule: ?string, sweep_schedule: ?string, batch: int|string, max_batches: int|string, lookback_seconds: int|string, settle_seconds: int|string, max_attempts: int|string}, verify: array{schedule: ?string, max_unsealed_age_seconds: int|string}, anchor: array{driver: ?string, disk: ?string, path: string, batch: int|string}}, lifecycle: array{journal_table: string, holds_table: string, lock_table: string}, retention: array{after_days: int|string, categories: array<string, int|string>, preserve: array<string, int|string>, batch: int|string, max_seconds: int|string, schedule: ?string}, import: array{batches_table: string, chunk: int|string, max_skew_seconds: int|string, max_line_bytes: int|string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, capture: array{laravel: array{except_guards: list<string>, identifier_key: string}, gate: array{enabled: bool|string, only_abilities: ?list<string>, except_abilities: list<string>, reason_codes: list<string>}, bulk: array{max_members: int|string, max_bytes: int|string}}, read: array{max_per_page: int|string}, export: array{chunk: int|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, privacy: array{keys: array<string, string>, current: ?string, subject_keys_table: string, owner_erasures_table: string, key_uses_table: string, rewrap_batch: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}, monitor: array{seal_minutes: int|string, daily_minutes: int|string, outbox_minutes: int|string}} $config */
+        /** @var array{storage: array{connection: ?string, maintenance_connection: ?string}, entries: array{table: string, artifacts_table: string}, require_explicit_keys: bool|string, integrity: array{keys: array<string, string>, current: ?string, log_id: ?string, checkpoints_table: string, members_table: string, state_table: string, seal: array{schedule: ?string, sweep_schedule: ?string, batch: int|string, max_batches: int|string, lookback_seconds: int|string, settle_seconds: int|string, max_attempts: int|string}, verify: array{schedule: ?string, max_unsealed_age_seconds: int|string}, anchor: array{driver: ?string, disk: ?string, path: string, batch: int|string}}, lifecycle: array{journal_table: string, holds_table: string, lock_table: string}, retention: array{after_days: int|string, categories: array<string, int|string>, preserve: array<string, int|string>, batch: int|string, max_seconds: int|string, schedule: ?string}, import: array{batches_table: string, chunk: int|string, max_skew_seconds: int|string, max_line_bytes: int|string}, actor: array{guards: ?list<string>}, context: array{trust_request_id: bool|string, request_id_header: string, trust_traceparent: bool|string}, definitions: array{require_registered: bool|string}, capture: array{laravel: array{except_guards: list<string>, identifier_key: string}, gate: array{enabled: bool|string, only_abilities: ?list<string>, except_abilities: list<string>, reason_codes: list<string>}, bulk: array{max_members: int|string, max_bytes: int|string}}, read: array{max_per_page: int|string}, export: array{chunk: int|string}, source: array{id: ?string, region: ?string}, redaction: array{keys: list<string>, key: ?string, identifiers: string, ip: string, max_bytes: int|string, max_context_bytes: int|string}, privacy: array{keys: array<string, string>, current: ?string, subject_keys_table: string, owner_erasures_table: string, key_uses_table: string, rewrap_batch: int|string}, failure: array{mode: string, log_channel: ?string}, delivery: array{mode: string, outbox: array{connection: ?string, table: string, lease_seconds: int|string, max_attempts: int|string, backoff_seconds: int|string}, deliveries_table: string}, monitor: array{seal_minutes: int|string, daily_minutes: int|string, outbox_minutes: int|string}} $config */
         $config = require self::CONFIG;
 
         return $config;

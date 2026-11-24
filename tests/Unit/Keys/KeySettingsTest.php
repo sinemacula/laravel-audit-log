@@ -223,6 +223,33 @@ final class KeySettingsTest extends TestCase
     }
 
     /**
+     * With explicit keys required, an empty ring is refused instead of deriving
+     * from `app.key`, even beside a current key id.
+     *
+     * @return void
+     */
+    public function testAnEmptyRingIsRefusedWhenExplicitKeysAreRequired(): void
+    {
+        $message = '`audit-log.privacy.keys` must be set while `audit-log.require_explicit_keys` is on.';
+
+        foreach ([[], ['current' => 'w1']] as $privacy) {
+            $config   = new Repository(['audit-log' => ['require_explicit_keys' => true, 'privacy' => $privacy], 'app' => ['key' => self::APP_KEY]]);
+            $settings = new KeySettings($config, new IntegritySettings($config));
+
+            self::assertRefused($message, $settings->currentKeyId(...));
+            self::assertRefused($message, $settings->validate(...));
+        }
+
+        $config = new Repository(['audit-log' => ['require_explicit_keys' => true, 'privacy' => ['keys' => ['w1' => self::RAW_SECRET], 'current' => 'w1']]]);
+
+        self::assertSame('w1', (new KeySettings($config, new IntegritySettings($config)))->currentKeyId());
+
+        $config->set('audit-log.require_explicit_keys', 'yes');
+
+        self::assertRefused('`audit-log.require_explicit_keys` must be true or false.', (new KeySettings($config, new IntegritySettings($config)))->currentKeyId(...));
+    }
+
+    /**
      * Settings are read on every call, so a change to the configuration is seen
      * by the next call without a new instance.
      *

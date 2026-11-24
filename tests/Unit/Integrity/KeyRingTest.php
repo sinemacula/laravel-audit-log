@@ -226,6 +226,27 @@ final class KeyRingTest extends TestCase
     }
 
     /**
+     * With explicit keys required, an empty ring neither signs nor finds the
+     * key derived from `app.key`.
+     *
+     * @return void
+     */
+    public function testAnEmptyRingDerivesNothingWhenExplicitKeysAreRequired(): void
+    {
+        $ring    = new KeyRing(new IntegritySettings(new Repository(['audit-log' => ['require_explicit_keys' => true, 'integrity' => []], 'app' => ['key' => self::APP_KEY]])));
+        $message = '`audit-log.integrity.keys` must be set while `audit-log.require_explicit_keys` is on.';
+
+        foreach ([$ring->signingKey(...), static fn (): IntegrityKey => $ring->key(self::DERIVED_ID)] as $call) {
+            try {
+                $call();
+                self::fail('Expected the empty ring to be refused.');
+            } catch (\InvalidArgumentException $exception) {
+                self::assertSame($message, $exception->getMessage());
+            }
+        }
+    }
+
+    /**
      * An explicit ring never reads the application keys, so a malformed
      * `app.key` or previous key beside it signs and verifies.
      *
