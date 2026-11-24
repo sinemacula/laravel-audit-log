@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/sinemacula/laravel-audit-log/compare/v0.1.0...v0.2.0) (2026-11-24)
+
+
+### Features
+
+* add require_explicit_keys to refuse keys derived from app.key ([#106](https://github.com/sinemacula/laravel-audit-log/issues/106)) ([fead934](https://github.com/sinemacula/laravel-audit-log/commit/fead93417076736c49f5dc768dec87d196ad26fa))
+
 ## 0.1.0 (2026-11-21)
 
 First release. Event-driven audit logging for Laravel: who did what, to what, on whose behalf and from where, as
