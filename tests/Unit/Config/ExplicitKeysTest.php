@@ -22,6 +22,27 @@ use SineMacula\Laravel\AuditLog\Config\ExplicitKeys;
 final class ExplicitKeysTest extends TestCase
 {
     /**
+     * The reader is a utility container and cannot be instantiated.
+     *
+     * @SuppressWarnings("php:S3011")
+     *
+     * @return void
+     */
+    public function testConstructorIsPrivate(): void
+    {
+        $reflection  = new \ReflectionClass(ExplicitKeys::class);
+        $constructor = $reflection->getConstructor();
+
+        self::assertNotNull($constructor);
+        self::assertTrue($constructor->isPrivate());
+
+        $instance = $reflection->newInstanceWithoutConstructor();
+        $constructor->invoke($instance);
+
+        self::assertInstanceOf(ExplicitKeys::class, $instance);
+    }
+
+    /**
      * Explicit keys are not required unless the setting says so.
      *
      * @return void
