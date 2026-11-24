@@ -435,6 +435,44 @@ final class RedactionSettingsTest extends TestCase
     }
 
     /**
+     * With explicit keys required, an empty key is refused instead of reading
+     * `app.key`, and a set one is still the root key.
+     *
+     * @return void
+     */
+    public function testAnEmptyKeyIsRefusedWhenExplicitKeysAreRequired(): void
+    {
+        foreach ([null, ''] as $key) {
+            $config   = ['audit-log' => ['require_explicit_keys' => true, 'redaction' => ['key' => $key]], 'app' => ['key' => self::RAW_SECRET]];
+            $settings = new RedactionSettings(new Repository($config));
+
+            try {
+                $settings->rootKey();
+                self::fail('Expected the empty key to be refused.');
+            } catch (\InvalidArgumentException $exception) {
+                self::assertSame('`audit-log.redaction.key` must be set while `audit-log.require_explicit_keys` is on.', $exception->getMessage());
+            }
+        }
+
+        $settings = new RedactionSettings(new Repository(['audit-log' => ['require_explicit_keys' => true, 'redaction' => ['key' => self::BASE64_SECRET]]]));
+
+        self::assertSame(str_repeat("\xAB", 32), $settings->rootKey());
+    }
+
+    /**
+     * A malformed flag fails the root key even beside an explicit key.
+     *
+     * @return void
+     */
+    public function testAMalformedRequireExplicitKeysFailsBesideAnExplicitKey(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('`audit-log.require_explicit_keys` must be true or false.');
+
+        (new RedactionSettings(new Repository(['audit-log' => ['require_explicit_keys' => 'yes', 'redaction' => ['key' => self::RAW_SECRET]]])))->rootKey();
+    }
+
+    /**
      * An application key as Laravel writes it is decoded.
      *
      * @return void

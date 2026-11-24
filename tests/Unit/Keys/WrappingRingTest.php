@@ -150,6 +150,31 @@ final class WrappingRingTest extends TestCase
     }
 
     /**
+     * With explicit keys required, an empty ring wraps under no derived key,
+     * and an explicit ring still unwraps one so a rewrap can move it.
+     *
+     * @return void
+     */
+    public function testRequiredExplicitKeysRefuseOnlyAnEmptyRing(): void
+    {
+        $derived = self::ring([])->current();
+        $config  = new Repository(['audit-log' => ['require_explicit_keys' => true, 'privacy' => []], 'app' => ['key' => self::APP_KEY]]);
+        $empty   = new WrappingRing(new KeySettings($config, new IntegritySettings($config)));
+
+        try {
+            $empty->current();
+            self::fail('Expected the empty ring to be refused.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertSame('`audit-log.privacy.keys` must be set while `audit-log.require_explicit_keys` is on.', $exception->getMessage());
+        }
+
+        $config->set('audit-log.privacy', ['keys' => ['w2026' => self::NEW_SECRET], 'current' => 'w2026']);
+
+        self::assertSame('w2026', $empty->current()->id);
+        self::assertSame($derived->secret(), $empty->key($derived->id)->secret());
+    }
+
+    /**
      * An explicit ring is read without `app.key`: a missing or malformed
      * application key adds no derived key and refuses nothing.
      *

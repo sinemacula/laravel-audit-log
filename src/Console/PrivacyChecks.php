@@ -8,6 +8,7 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Database\Connection;
 use Illuminate\Database\DatabaseManager;
+use SineMacula\Laravel\AuditLog\Config\ExplicitKeys;
 use SineMacula\Laravel\AuditLog\Config\IntegerSetting;
 use SineMacula\Laravel\AuditLog\Config\SecretSetting;
 use SineMacula\Laravel\AuditLog\Contracts\CheckpointAnchor;
@@ -529,7 +530,7 @@ final readonly class PrivacyChecks
         $integrity = new IntegritySettings($config);
         $keys      = new KeySettings($config, $integrity);
 
-        if ($keys->explicitKeys() !== [] || $integrity->explicitKeys() === []) {
+        if (ExplicitKeys::required($config) || $keys->explicitKeys() !== [] || $integrity->explicitKeys() === []) {
             return;
         }
 

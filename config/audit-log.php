@@ -47,6 +47,22 @@ return [
 
     /*
     |---------------------------------------------------------------------------
+    | Explicit keys
+    |---------------------------------------------------------------------------
+    |
+    | `integrity.keys`, `redaction.key` and `privacy.keys` each derive from
+    | `app.key` when empty, and a rotated `app.key` changes them. Turn this on
+    | to refuse that fallback, so an empty one fails where its key is needed
+    | and in `audit-log:check`. An explicit privacy ring still unwraps the
+    | owners' keys wrapped under a derived key until `audit-log:rewrap` moves
+    | them.
+    |
+    */
+
+    'require_explicit_keys' => env('AUDIT_LOG_REQUIRE_EXPLICIT_KEYS', false),
+
+    /*
+    |---------------------------------------------------------------------------
     | Integrity
     |---------------------------------------------------------------------------
     |

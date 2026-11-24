@@ -122,7 +122,8 @@ is in `threat-model.md`.
 - A malformed setting fails the write whatever the record holds, because `redaction.keys`, `redaction.identifiers`,
   `redaction.ip` and both budgets are read before anything is sealed. A malformed `redaction.key`, or a missing or
   malformed `app.key` beneath an empty one, fails only a capture that needs a hash, and never falls back: a malformed
-  `redaction.key` is not replaced by `app.key`. `audit-log:check` reports them either way.
+  `redaction.key` is not replaced by `app.key`. With `require_explicit_keys` on, an empty `redaction.key` fails in the
+  same place instead of reading `app.key`. `audit-log:check` reports them either way.
 - A blank identifier, empty once cleaned and trimmed, stores no hash and no diagnostic: a sign-in form can post one, so
   it is not a programming error. A blank pseudonymised field still hashes.
 - `redaction.identifiers` `drop` and `redaction.ip` `drop` are configuration, not loss, and add no diagnostic.

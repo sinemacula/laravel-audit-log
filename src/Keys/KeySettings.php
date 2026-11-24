@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\AuditLog\Keys;
 
 use Illuminate\Contracts\Config\Repository;
+use SineMacula\Laravel\AuditLog\Config\ExplicitKeys;
 use SineMacula\Laravel\AuditLog\Config\IntegerSetting;
 use SineMacula\Laravel\AuditLog\Config\SecretSetting;
 use SineMacula\Laravel\AuditLog\Integrity\IntegritySettings;
@@ -89,8 +90,13 @@ final readonly class KeySettings
             throw new \InvalidArgumentException(self::CURRENT_NOT_IN_RING);
         }
 
-        $current = $current === '' ? null : $current;
-        $keys    = $this->explicitKeys();
+        $current  = $current === '' ? null : $current;
+        $keys     = $this->explicitKeys();
+        $required = ExplicitKeys::required($this->config);
+
+        if ($keys === [] && $required) {
+            throw new \InvalidArgumentException(ExplicitKeys::missing(self::PREFIX . 'keys'));
+        }
 
         if ($keys === []) {
             return $current === null ? null : throw new \InvalidArgumentException(self::CURRENT_WITHOUT_KEYS);
